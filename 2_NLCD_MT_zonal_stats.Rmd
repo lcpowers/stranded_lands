@@ -1,0 +1,89 @@
+---
+title: "Zonal Statistics on NLCD land  classes in Montana"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### 1. Read packages and data
+```{r packages_and_data}
+
+library(tidyverse)
+library(raster)
+setwd("~/Desktop/StrandedLand/stranded_repo/")
+
+nlcd_mt <- raster("./output/nlcd/nlcd_mt.tif")
+values(nlcd_mt)[values(nlcd_mt)==0] <- NA
+
+nlcd_mt_stranded <- raster("./output/nlcd/nlcd_mt_stranded.tif")
+nlcd_gb <- raster("./output/nlcd/nlcd_gb.tif")
+nlcd_gb_stranded <- raster("./output/nlcd/nlcd_gb_stranded.tif")
+
+
+raster_list <- as.list(nlcd_mt,nlcd_mt_stranded,nlcd_gb,nlcd_gb_stranded)
+```
+
+
+### 2. Look at land in each NLCD class (reclassified)
+```{r zonal_stats}
+
+zonal_stats = as.data.frame(matrix(nrow = 10, ncol = 2))
+colnames(zonal_stats) = c("value","desc")
+
+zonal_stats[,1] = c(11,12,20,25,30,40,50,70,80,90)
+zonal_stats[,2] = c("open water","ice or snow","low intensity development","high intensity development","barren","forest","shrub","herbaceous","cropland","wetlands")
+
+
+timestamp() ### 
+
+for(i in 1:length(raster_list)){
+  
+  print(i)
+  tmp_df <- as.data.frame(freq(raster_list[[i]]))
+  zonal_stats = merge(zonal_stats,tmp_df,by = "value",all=TRUE)
+  # remove(tmp_df)
+  
+}
+
+timestamp() ### 
+
+colnames(zonal_stats) = c("value", "nlcd_description","mt","mt_stranded","gb","gb_stranded")
+
+# dir.create("./output/csv")
+write_csv(zonal_stats,"./output/csv/nlcd_mt_overview.csv")
+```
+
+### 3. Look at land area of each NLCD class in Montana, GB, and stranded lands at each extent 
+```{r total_land}
+
+zonal_stats_area = zonal_stats[1:10,]
+zonal_stats_area[is.na(zonal_stats_area)] = 0
+zonal_stats_area[,3:6] <- round(zonal_stats_area[,3:6]*(30**2)*0.000247,3)
+
+write_csv(zonal_stats_area, "./output/csv/nlcd_mt_area.csv")
+
+total_land = as.data.frame(matrix(ncol=4,nrow=1))
+for(i in 3:ncol(zonal_stats_area)){
+  
+  total_land[1,i-2] = round(sum(zonal_stats_area[,i]),3)
+  
+}
+colnames(total_land) = c("mt","mt_stranded","gb","gb_stranded")
+
+write_csv(total_land,"./output/csv/nlcd_mt_totalArea.csv")
+```
+
+
+### 4. Look at the percentage of each land class tied up in stranded land
+```{r percentages}
+
+zonal_stats_props = zonal_stats_area %>% 
+  group_by(value,nlcd_description) %>% 
+  summarise(prop_stranded_mt = round(mt_stranded/mt*100,2),
+            prop_stranded_gb = round(gb_stranded/gb*100,2))
+
+write_csv(zonal_stats_props, "./output/csv/nlcd_area_percentages.csv")
+```
+
