@@ -21,7 +21,6 @@ nlcd_mt_stranded <- raster("./output/nlcd/nlcd_mt_stranded.tif")
 nlcd_gb <- raster("./output/nlcd/nlcd_gb.tif")
 nlcd_gb_stranded <- raster("./output/nlcd/nlcd_gb_stranded.tif")
 
-
 raster_list <- as.list(nlcd_mt,nlcd_mt_stranded,nlcd_gb,nlcd_gb_stranded)
 ```
 
