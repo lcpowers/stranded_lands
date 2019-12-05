@@ -8,9 +8,56 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
+### 1. Packages and data
+```{r package_data}
+
+library(raster)
+library(tidyverse)
+library(sf)
+library(rgdal)
+library(rgeos)
+library(maptools)
+
+mt_nlcd = raster("../R_output_files/nlcd/nlcd_mt.tif")
+mt_stranded_nlcd = raster("../R_output_files/nlcd/nlcd_mt_stranded.tif")
+gb_nlcd = raster("../R_output_files/nlcd/nlcd_gb.tif")
+gb_stranded_nlcd = raster("../R_output_files/nlcd/nlcd_gb_stranded.tif")
+
+roads = readOGR("../R_input_files/mt_transpo/Roads.shp") %>% 
+  spTransform(.,crs(mt_nlcd)) %>% 
+  st_as_sf()
+
+```
+
+### 2. Creating buffered roads raster
 ```{r}
 
+roads_NHS = roads %>% 
+  filter(ROADTYPE == "NHS INTERSTATE") %>% 
+  select(SOURCEID,ROADTYPE) %>% 
+  as(.,"Spatial") %>% 
+  gLineMerge() %>% 
+  gBuffer(.,width = 200)
 
+roads_PA = roads %>% 
+  filter(ROADTYPE == "PRINCIPAL ARTERIAL") %>% 
+  select(SOURCEID,ROADTYPE) %>% 
+  as(.,"Spatial") %>% 
+  gLineMerge() %>% 
+  gBuffer(.,width = 100)
+
+roads_buffer = gUnion(roads_NHS,roads_PA) %>% 
+  st_as_sf()
+
+roads_buffer$road = 1
+
+roads_buffer = as(roads_buffer,"Spatial")
+
+timestamp() # 6:46:24
+beginCluster(10)
+roads_raster = clusterR(roads_buffer,rasterize,args = list(y = mt_nlcd,field = 1))
+endCluster()
+timestamp() 
 
 ```
 
