@@ -42,40 +42,43 @@ roads_NHS = roads %>%
   select(SOURCEID,ROADTYPE) %>% 
   # Turn back into spatial lines
   as(.,"Spatial") %>% 
-  as(.,"SpatialLines") %>% 
-  # Merge all line segments together
   gLineMerge()
 
 # Add a 200-m buffer
-roads_NHS_buffer = buffer(roads_NHS,width = 400)
+roads_NHS_buffer = gBuffer(roads_NHS,width = 200) %>% 
+  st_as_sf()
 
 ## Major Highways
 roads_PA = roads %>% 
   filter(ROADTYPE == "PRINCIPAL ARTERIAL") %>% 
   select(SOURCEID,ROADTYPE) %>% 
   as(.,"Spatial") %>% 
-  as(.,"SpatialLines") %>% 
-  gLineMerge() 
+  gLineMerge()
 
-roads_PA_buffer <- buffer(roads_PA,width = 200)
+roads_PA_buffer = gBuffer(roads_PA,width=100) %>% 
+  st_as_sf()
 
 ## Combine NHS interstate and other highway spatial lines files
-roads_buffer = gLineMerge(roads_NHS_buffer,roads_PA_buffer) 
+roads_buffer = rbind(roads_NHS_buffer,roads_PA_buffer) %>% 
+  as(.,"Spatial")
 
-ras <- mt_nlcd
-ras[] <- NA
+# ras <- mt_nlcd
+# ras[] <- NA
 
 roads_raster = rasterize(x = roads_buffer,y = ras,field = 1)
 
-dir.create("../R_output_files/transpo/shp",recursive = T)
+plot(roads_buffer)
+plot(roads_raster,add=TRUE,col="red")
 
-writeOGR(obj = roads_buffer,
-         dsn = "../R_output_files/transpo/shp/",
-         layer = "roads_buffer",
-         driver = "ESRI Shapefile",
-         overwrite = T)
+# dir.create("../R_output_files/transpo/shp",recursive = T)
 
-writeRaster(roads_raster,"../R_output_files/transpo/roads_raster.tif",overwrite = R)
+# writeOGR(obj = roads_buffer,
+#          dsn = "../R_output_files/transpo/shp/",
+#          layer = "roads_buffer",
+#          driver = "ESRI Shapefile",
+#          overwrite = T)
+
+writeRaster(roads_raster,"../R_output_files/transpo/roads_raster.tif",overwrite = TRUE)
 ```
 
 ### 3. Reclassifying NLCD for Circsuitscape Resistances
@@ -84,7 +87,7 @@ dir.create("../R_output_files/circuitscape/resistance/", recursive = T)
 
 resistance_1 <- mt_nlcd
 values(resistance_1)[values(resistance_1)>0] <- 1
-writeRaster(resistance_1,"../R_output_files/circuitscape/resistance/resistance_1.asc", format = "ascii", overwrite = T)
+
 
 cs_rcl_mat <- c(-Inf,11.5,0,
                      11.5,12.5,24, # Perennial ice/snow is low resistance
@@ -99,12 +102,13 @@ cs_rcl_mat <- c(-Inf,11.5,0,
 
 resistance_nlcd <- reclassify(mt_nlcd, rcl = cs_rcl_mat)
 
-# values(roads_raster)[values(roads_raster)>0] <- 100
-resistance_roads_nlcd <- cover(resistance_nlcd,roads_raster)
+values(roads_raster)[values(roads_raster)>0] <- 100
+resistance_roads_nlcd <- cover(roads_raster, resistance_nlcd)
+
+resistance_roads_nlcd <- reclassify(resistance_roads_nlcd,c(NA,-9999))
 
 writeRaster(resistance_nlcd,"../R_output_files/circuitscape/resistance/resistance_nlcd.asc",format = "ascii", overwrite = T)
 writeRaster(resistance_roads_nlcd,"../R_output_files/circuitscape/resistance/resistance_roads_nlcd.asc",format = "ascii", overwrite = T)
-
+writeRaster(resistance_1,"../R_output_files/circuitscape/resistance/resistance_1.asc", format = "ascii", overwrite = T)
 ```
-
 
