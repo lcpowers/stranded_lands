@@ -62,10 +62,11 @@ roads_PA_buffer = gBuffer(roads_PA,width=100) %>%
 roads_buffer = rbind(roads_NHS_buffer,roads_PA_buffer) %>% 
   as(.,"Spatial")
 
-# ras <- mt_nlcd
-# ras[] <- NA
+ras <- mt_nlcd
+ras[] <- NA
 
 roads_raster = rasterize(x = roads_buffer,y = ras,field = 1)
+values(roads_raster)[values(roads_raster)>0] <- 100
 
 plot(roads_buffer)
 plot(roads_raster,add=TRUE,col="red")
@@ -83,7 +84,7 @@ writeRaster(roads_raster,"../R_output_files/transpo/roads_raster.tif",overwrite 
 
 ### 3. Reclassifying NLCD for Circsuitscape Resistances
 ```{r reclass_for_CS}
-dir.create("../R_output_files/circuitscape/resistance/", recursive = T)
+# dir.create("../R_output_files/circuitscape/resistance/", recursive = T)
 
 resistance_1 <- mt_nlcd
 values(resistance_1)[values(resistance_1)>0] <- 1
@@ -102,13 +103,12 @@ cs_rcl_mat <- c(-Inf,11.5,0,
 
 resistance_nlcd <- reclassify(mt_nlcd, rcl = cs_rcl_mat)
 
-values(roads_raster)[values(roads_raster)>0] <- 100
 resistance_roads_nlcd <- cover(roads_raster, resistance_nlcd)
+NAvalue(resistance_roads_nlcd) <- -9999
 
-resistance_roads_nlcd <- reclassify(resistance_roads_nlcd,c(NA,-9999))
-
-writeRaster(resistance_nlcd,"../R_output_files/circuitscape/resistance/resistance_nlcd.asc",format = "ascii", overwrite = T)
+# writeRaster(resistance_nlcd,"../R_output_files/circuitscape/resistance/resistance_nlcd.asc",format = "ascii", overwrite = T)
 writeRaster(resistance_roads_nlcd,"../R_output_files/circuitscape/resistance/resistance_roads_nlcd.asc",format = "ascii", overwrite = T)
-writeRaster(resistance_1,"../R_output_files/circuitscape/resistance/resistance_1.asc", format = "ascii", overwrite = T)
+# writeRaster(resistance_1,"../R_output_files/circuitscape/resistance/resistance_1.asc", format = "ascii", overwrite = T)
 ```
+
 

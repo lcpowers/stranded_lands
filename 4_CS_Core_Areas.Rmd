@@ -8,3 +8,13 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
+### 1. Packages and data
+```{r packages_data}
+
+library(rgdal)
+library(raster)
+
+pad <- readOGR("../R_input_files/mt_pad/PADUS2_0Designation_MT.shp")
+
+```
+
