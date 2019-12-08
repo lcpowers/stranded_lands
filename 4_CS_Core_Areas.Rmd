@@ -27,7 +27,6 @@ nlcd_mt <- raster("../R_output_files/nlcd/nlcd_mt.tif")
 ### 2. Creating Core Areas
 ```{r core_areas}
 
-
 pad_fltr = pad %>% 
   spTransform(.,crs(nlcd_mt)) %>% 
   st_as_sf() %>% 
@@ -41,6 +40,7 @@ pad_fltr = dplyr::filter(pad_fltr, GIS_Acres > 50)
 pad_shp = as(pad_fltr,"Spatial")
 
 pad_centroids = st_centroid(pad_fltr) %>% 
+  st_as_sf() %>% 
   as(.,"Spatial")
 
 plot(pad_shp)
@@ -56,7 +56,8 @@ writeOGR(obj = pad_shp,
 writeOGR(obj = pad_centroids, 
          dsn =  "../R_output_files/circuitscape/core_areas/pad_shp/",
          layer = "pad_centroids",
-         driver = "ESRI Shapefile")
+         driver = "ESRI Shapefile",
+         overwrite=T)
 ```
 
 
