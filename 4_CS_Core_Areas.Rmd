@@ -13,8 +13,70 @@ knitr::opts_chunk$set(echo = TRUE)
 
 library(rgdal)
 library(raster)
+library(sf)
+library(parallel)
+library(rgeos)
+
+setwd("~/StrandedLand/stranded_repo") # Bren R server
+# setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
 
 pad <- readOGR("../R_input_files/mt_pad/PADUS2_0Designation_MT.shp")
-
+nlcd_mt <- raster("../R_output_files/nlcd/nlcd_mt.tif")
 ```
+
+### 2. Creating Core Areas
+```{r core_areas}
+
+
+pad_fltr = pad %>% 
+  spTransform(.,crs(nlcd_mt)) %>% 
+  st_as_sf() %>% 
+  dplyr::select(GAP_Sts,d_GAP_Sts,IUCN_Cat, GIS_Acres) %>% 
+  dplyr::filter(GAP_Sts == 1|GAP_Sts ==2) 
+
+pad_fltr$GIS_Acres = as.numeric(pad_fltr$GIS_Acres)
+
+pad_fltr = dplyr::filter(pad_fltr, GIS_Acres > 50)
+
+pad_shp = as(pad_fltr,"Spatial")
+
+pad_centroids = st_centroid(pad_fltr) %>% 
+  as(.,"Spatial")
+
+plot(pad_shp)
+plot(pad_centroids, add=TRUE, col="red")
+
+dir.create("../R_output_files/circuitscape/core_areas/pad_shp", recursive = T)
+
+writeOGR(obj = pad_shp, 
+         dsn =  "../R_output_files/circuitscape/core_areas/pad_shp/",
+         layer = "pad_polygons",
+         driver = "ESRI Shapefile")
+
+writeOGR(obj = pad_centroids, 
+         dsn =  "../R_output_files/circuitscape/core_areas/pad_shp/",
+         layer = "pad_centroids",
+         driver = "ESRI Shapefile")
+```
+
+
+```{r}
+
+features = 1:nrow(pad_shp[,])
+n = 50
+ftr_parts = split(features, cut(features,n))
+
+no_cores = detectCores() - 8
+cl = makeCluster(no_cores, type = "FORK")
+
+system.time(rParts <- parLapply(cl = cl, X = 1:n, fun = function(x) rasterize(pad_shp[ftr_parts[[x]],], nlcd_mt,"ID")))
+
+stopCluster()
+
+cores = 
+```
+
+
+
+
 

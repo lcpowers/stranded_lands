@@ -18,6 +18,9 @@ library(rgdal)
 library(rgeos)
 library(maptools)
 
+setwd("~/StrandedLand/stranded_repo") # Bren R server
+# setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
+
 mt_nlcd = raster("../R_output_files/nlcd/nlcd_mt.tif")
 values(mt_nlcd)[values(mt_nlcd)==0] <- NA
 

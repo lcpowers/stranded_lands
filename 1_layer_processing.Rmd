@@ -20,13 +20,14 @@ library(rgdal)
 library(sf)
 library(cleangeo)
 
-setwd("~/Desktop/StrandedLand/stranded_repo") # Sets working directory on my computer. This will need to be updated on anyone else's computer
+setwd("~/StrandedLand/stranded_repo") # Bren R server
+# setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
 ```
 
 ### 2. Load Data
 ```{r load_data}
 
-nlcd <- raster("./input_data/nlcd/NLCD_2016_Land_Cover_L48_20190424.img")
+nlcd <- raster("../")
 
 mt_outline <- readOGR("./input_data/mt_outline/StateofMontana.shp") %>% 
   # Put into NLCD CRS so the layers overlap 
@@ -100,7 +101,7 @@ timestamp() #### 9:32:40
 
 # beginCluster(10)
 # Reclassify mt NLCD raster
-nlcd_mt_rcl <- clusterR(nlcd_mt,reclassify,args = list(rcl_mat,include.lowest=TRUE))
+nlcd_mt_rcl <- clusterR(nlcd_mt, reclassify,args = list(rcl_mat,include.lowest=TRUE))
 # endCluster()
 
 timestamp() #### 9:33:50

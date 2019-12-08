@@ -12,14 +12,17 @@ knitr::opts_chunk$set(echo = TRUE)
 
 library(tidyverse)
 library(raster)
-setwd("~/Desktop/StrandedLand/stranded_repo/")
+library(parallel)
 
-nlcd_mt <- raster("./output/nlcd/nlcd_mt.tif")
+setwd("~/StrandedLand/stranded_repo") # Bren R server
+# setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
+
+nlcd_mt <- raster("../R_output_files/nlcd/nlcd_mt.tif")
 values(nlcd_mt)[values(nlcd_mt)==0] <- NA
 
-nlcd_mt_stranded <- raster("./output/nlcd/nlcd_mt_stranded.tif")
-nlcd_gb <- raster("./output/nlcd/nlcd_gb.tif")
-nlcd_gb_stranded <- raster("./output/nlcd/nlcd_gb_stranded.tif")
+nlcd_mt_stranded <- raster("../R_output_files/nlcd/nlcd_mt_stranded.tif")
+nlcd_gb <- raster("../R_output_files/nlcd/nlcd_gb.tif")
+nlcd_gb_stranded <- raster("../R_output_files/nlcd/nlcd_gb_stranded.tif")
 
 raster_list <- as.list(nlcd_mt,nlcd_mt_stranded,nlcd_gb,nlcd_gb_stranded)
 ```
