@@ -11,47 +11,80 @@ knitr::opts_chunk$set(echo = TRUE)
 ### 1. Packages and data
 ```{r packages_data}
 
+library(tidyverse)
 library(rgdal)
 library(raster)
 library(sf)
 library(parallel)
 library(rgeos)
+library(cleangeo)
 
 setwd("~/StrandedLand/stranded_repo") # Bren R server
 # setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
 
-pad <- readOGR("../R_input_files/mt_pad/PADUS2_0Designation_MT.shp")
 nlcd_mt <- raster("../R_output_files/nlcd/nlcd_mt.tif")
+
+pad <- readOGR("../R_input_files/mt_pad/PADUS2_0Designation_MT.shp")
+
 ```
 
 ### 2. Creating Core Areas
 ```{r core_areas}
 
-pad_fltr = pad %>% 
-  spTransform(.,crs(nlcd_mt)) %>% 
+### Clean geometries before doing anything else to shapefile. Trying to perform these functions after filtering the data did not work. Also not sure if this is working
+collection = cleangeo::clgeo_CollectionReport(pad)
+bad_polys = cleangeo::clgeo_SuspiciousFeatures(collection)
+pad_clean = cleangeo::clgeo_Clean(pad)
+
+### Filter PAD shapefile
+pad_fltr = pad_clean %>% 
   st_as_sf() %>% 
   dplyr::select(GAP_Sts,d_GAP_Sts,IUCN_Cat, GIS_Acres) %>% 
-  dplyr::filter(GAP_Sts == 1|GAP_Sts ==2) 
+  dplyr::filter(GAP_Sts == 1|GAP_Sts ==2 & IUCN_Cat != 'Ia') 
 
 pad_fltr$GIS_Acres = as.numeric(pad_fltr$GIS_Acres)
 
-pad_fltr = dplyr::filter(pad_fltr, GIS_Acres > 50)
+# To be used in the 
+pad_fltr$dissolve = rep(1,nrow(pad_fltr))
 
-pad_shp = as(pad_fltr,"Spatial")
+### Back into spatial object
+pad_shp = as(pad_fltr,"Spatial") 
 
-pad_centroids = st_centroid(pad_fltr) %>% 
-  st_as_sf() %>% 
+pad_pBuf = gBuffer(pad_shp,byid=TRUE,width = 1000)
+pad_union = unionSpatialPolygons(pad_pBuf,IDs = pad_pBuf@data$dissolve)
+pad_nBuf = gBuffer(pad_union,byid = TRUE,width = -1000) %>% 
+  as(.,"SpatialPolygonsDataFrame")
+
+#### Finding centroids
+pad_nBuf_sf = st_as_sf(pad_nBuf)
+
+
+pad_disagg = disaggregate(pad_nBuf) %>% 
+  st_as_sf()
+
+pad_disagg$area <- as.numeric(st_area(pad_disagg)*0.000247105)
+
+pad_disagg <- dplyr::filter(pad_disagg, area > 10000) %>% 
   as(.,"Spatial")
 
-plot(pad_shp)
-plot(pad_centroids, add=TRUE, col="red")
+pad_centroids = st_centroid(st_as_sf(pad_disagg)) %>% 
+  mutate(ras_value = 1) %>%
+  dplyr::select(ras_value) %>% 
+  as(.,"Spatial")
+```
 
-dir.create("../R_output_files/circuitscape/core_areas/pad_shp", recursive = T)
+```{r}
+writeOGR(obj = pad_disagg, 
+         dsn =  "../R_output_files/circuitscape/core_areas/pad_shp/",
+         layer = "pad_union",
+         driver = "ESRI Shapefile",
+         overwrite = T)
 
 writeOGR(obj = pad_shp, 
          dsn =  "../R_output_files/circuitscape/core_areas/pad_shp/",
          layer = "pad_polygons",
-         driver = "ESRI Shapefile")
+         driver = "ESRI Shapefile",
+         overwrite = T)
 
 writeOGR(obj = pad_centroids, 
          dsn =  "../R_output_files/circuitscape/core_areas/pad_shp/",
@@ -60,24 +93,13 @@ writeOGR(obj = pad_centroids,
          overwrite=T)
 ```
 
-
+### Rasterize centroids
 ```{r}
 
-features = 1:nrow(pad_shp[,])
-n = 50
-ftr_parts = split(features, cut(features,n))
+center_ras = rasterize(pad_centroids, nlcd_mt,value = 1)
+NAvalue(center_ras) <- 9999
+writeRaster(center_ras$ras_value,"../R_output_files/circuitscape/center.asc",format = "ascii")
 
-no_cores = detectCores() - 8
-cl = makeCluster(no_cores, type = "FORK")
-
-system.time(rParts <- parLapply(cl = cl, X = 1:n, fun = function(x) rasterize(pad_shp[ftr_parts[[x]],], nlcd_mt,"ID")))
-
-stopCluster()
-
-cores = 
 ```
-
-
-
 
 
