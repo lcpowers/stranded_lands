@@ -1,0 +1,55 @@
+---
+title: "3_CS_Resistance_Layers"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+### Packages and Working Directory
+```{r load_packages}
+library(raster)
+library(tidyverse)
+library(sf)
+library(rgdal)
+library(rgeos)
+library(maptools)
+
+# setwd("~/StrandedLand/stranded_repo") # Bren R server
+setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
+```
+
+### Data
+```{r get_data}
+
+mt_counties <- readOGR("../R_input_files/mt_counties/gb_outline.shp")
+
+# Get MT and GB NLCD raster data
+mt_nlcd = raster("../R_output_files/nlcd/nlcd_mt.tif")
+gb_nlcd = raster("../R_output_files/nlcd/nlcd_gb.tif")
+# Change cells with 0 value to NA
+values(mt_nlcd)[values(mt_nlcd)==0] <- NA
+
+# Get stranded NLCD data
+mt_stranded_nlcd = raster("../R_output_files/nlcd/nlcd_mt_stranded.tif")
+gb_stranded_nlcd = raster("../R_output_files/nlcd/nlcd_gb_stranded.tif")
+
+# Read in Montana Transportation (Roads) shapefile
+roads = readOGR("../R_input_files/mt_transpo/Roads.shp") %>% 
+  st_as_sf() %>% 
+  st_simplify()
+
+```
+
+
+```{r}
+
+roads_sum <- roads %>% 
+  select(-geometry) %>% 
+  group_by(System) %>%
+  tally()
+
+```
+

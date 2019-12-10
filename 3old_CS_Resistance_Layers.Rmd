@@ -7,43 +7,20 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+```{r}
+dem_img_files <- list.files("../R_input_files/dem/",
+                            pattern = ".img$",
+                            recursive = T,
+                            full.names = T)
 
-### 1. Packages and data
-```{r package_data}
+file.copy(from=dem_img_files, 
+          to="../R_input_files/dem/", 
+          recursive = FALSE, 
+          copy.mode = TRUE)
 
-library(raster)
-library(tidyverse)
-library(sf)
-library(rgdal)
-library(rgeos)
-library(maptools)
-
-# setwd("~/StrandedLand/stranded_repo") # Bren R server
-setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
-
-mt_counties <- readOGR("../R_input_files/mt_counties/gb_outline.shp")
-
-# Get MT and GB NLCD raster data
-mt_nlcd = raster("../R_output_files/nlcd/nlcd_mt.tif")
-gb_nlcd = raster("../R_output_files/nlcd/nlcd_gb.tif")
-
-# Change cells with 0 value to NA
-values(mt_nlcd)[values(mt_nlcd)==0] <- NA
-
-# Get stranded NLCD data
-mt_stranded_nlcd = raster("../R_output_files/nlcd/nlcd_mt_stranded.tif")
-gb_stranded_nlcd = raster("../R_output_files/nlcd/nlcd_gb_stranded.tif")
-
-# Read in Montana Transportation (Roads) shapefile
-roads = readOGR("../R_input_files/mt_transpo/Roads.shp") %>% 
-  st_as_sf() %>% 
-  st_simplify()
-
-roads_sum <- roads %>% 
-  select(-geometry) %>% 
-  group_by(System) %>%
-  tally()
 ```
+
+
 
 
 ### 2. Creating buffered roads raster
