@@ -14,8 +14,8 @@ library(tidyverse)
 library(raster)
 library(parallel)
 
-setwd("~/StrandedLand/stranded_repo") # Bren R server
-# setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
+# setwd("~/StrandedLand/stranded_repo") # Bren R server
+setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
 
 nlcd_mt <- raster("../R_output_files/nlcd/nlcd_mt.tif")
 values(nlcd_mt)[values(nlcd_mt)==0] <- NA
@@ -54,7 +54,7 @@ timestamp() ###
 colnames(zonal_stats) = c("value", "nlcd_description","mt","mt_stranded","gb","gb_stranded")
 
 # dir.create("./output/csv")
-write_csv(zonal_stats,"./output/csv/nlcd_mt_overview.csv")
+write_csv(zonal_stats,"../R_output_files/csv/nlcd_mt_overview.csv")
 ```
 
 ### 3. Look at land area of each NLCD class in Montana, GB, and stranded lands at each extent 
@@ -64,7 +64,7 @@ zonal_stats_area = zonal_stats[1:10,]
 zonal_stats_area[is.na(zonal_stats_area)] = 0
 zonal_stats_area[,3:6] <- round(zonal_stats_area[,3:6]*(30**2)*0.000247,3)
 
-write_csv(zonal_stats_area, "./output/csv/nlcd_mt_area.csv")
+write_csv(zonal_stats_area, "../R_output_files/csv/nlcd_mt_area.csv")
 
 total_land = as.data.frame(matrix(ncol=4,nrow=1))
 for(i in 3:ncol(zonal_stats_area)){
@@ -74,7 +74,7 @@ for(i in 3:ncol(zonal_stats_area)){
 }
 colnames(total_land) = c("mt","mt_stranded","gb","gb_stranded")
 
-write_csv(total_land,"./output/csv/nlcd_mt_totalArea.csv")
+write_csv(total_land,"../R_output_files/csv/nlcd_mt_totalArea.csv")
 ```
 
 
@@ -86,6 +86,6 @@ zonal_stats_props = zonal_stats_area %>%
   summarise(prop_stranded_mt = round(mt_stranded/mt*100,2),
             prop_stranded_gb = round(gb_stranded/gb*100,2))
 
-write_csv(zonal_stats_props, "./output/csv/nlcd_area_percentages.csv")
+write_csv(zonal_stats_props, "../R_output_files/csv/nlcd_area_percentages.csv")
 ```
 

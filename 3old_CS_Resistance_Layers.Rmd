@@ -1,4 +1,4 @@
----
+    ---
 title: "Preparing resistance layers for Circuitscape"
 output: html_document
 ---
@@ -18,26 +18,38 @@ library(rgdal)
 library(rgeos)
 library(maptools)
 
-setwd("~/StrandedLand/stranded_repo") # Bren R server
-# setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
+# setwd("~/StrandedLand/stranded_repo") # Bren R server
+setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
 
+mt_counties <- readOGR("../R_input_files/mt_counties/gb_outline.shp")
+
+# Get MT and GB NLCD raster data
 mt_nlcd = raster("../R_output_files/nlcd/nlcd_mt.tif")
+gb_nlcd = raster("../R_output_files/nlcd/nlcd_gb.tif")
+
+# Change cells with 0 value to NA
 values(mt_nlcd)[values(mt_nlcd)==0] <- NA
 
+# Get stranded NLCD data
 mt_stranded_nlcd = raster("../R_output_files/nlcd/nlcd_mt_stranded.tif")
-gb_nlcd = raster("../R_output_files/nlcd/nlcd_gb.tif")
 gb_stranded_nlcd = raster("../R_output_files/nlcd/nlcd_gb_stranded.tif")
 
+# Read in Montana Transportation (Roads) shapefile
 roads = readOGR("../R_input_files/mt_transpo/Roads.shp") %>% 
-  spTransform(.,crs(mt_nlcd)) %>% 
-  st_as_sf()
+  st_as_sf() %>% 
+  st_simplify()
 
+roads_sum <- roads %>% 
+  select(-geometry) %>% 
+  group_by(System) %>%
+  tally()
 ```
+
 
 ### 2. Creating buffered roads raster
 ```{r}
 
-## Major Interstates
+##### Filter Roads Shapefile for Major interstates #####
 roads_NHS = roads %>% 
   # Filter Roads shapefile for major interstates
   filter(ROADTYPE == "NHS INTERSTATE") %>% 
@@ -47,7 +59,7 @@ roads_NHS = roads %>%
   as(.,"Spatial") %>% 
   gLineMerge()
 
-# Add a 200-m buffer
+# Add a 200-m buffer to major interstates
 roads_NHS_buffer = gBuffer(roads_NHS,width = 200) %>% 
   st_as_sf()
 
@@ -62,13 +74,15 @@ roads_PA_buffer = gBuffer(roads_PA,width=100) %>%
   st_as_sf()
 
 ## Combine NHS interstate and other highway spatial lines files
-roads_buffer = rbind(roads_NHS_buffer,roads_PA_buffer) %>% 
+roads_buffer = rbind(roads_PA_buffer,roads_NHS_buffer) %>% 
+  st_transform(.,crs(mt_counties)) %>% 
   as(.,"Spatial")
 
 ras <- mt_nlcd
-ras[] <- NA
+values(ras) <- NA
 
-roads_raster = rasterize(x = roads_buffer,y = ras,field = 1)
+roads_raster <- rasterize(x = roads_buffer,y = ras,fun = 'first')
+
 values(roads_raster)[values(roads_raster)>0] <- 100
 
 plot(roads_buffer)
@@ -82,7 +96,7 @@ plot(roads_raster,add=TRUE,col="red")
 #          driver = "ESRI Shapefile",
 #          overwrite = T)
 
-writeRaster(roads_raster,"../R_output_files/transpo/roads_raster.tif",overwrite = TRUE)
+# writeRaster(roads_raster,"../R_output_files/transpo/roads_raster.tif",overwrite = TRUE)
 ```
 
 ### 3. Reclassifying NLCD for Circsuitscape Resistances
@@ -93,7 +107,7 @@ resistance_1 <- mt_nlcd
 values(resistance_1)[values(resistance_1)>0] <- 1
 
 
-cs_rcl_mat <- c(-Inf,11.5,0,
+cs_rcl_mat <- c(-Inf,11.5,NA,
                      11.5,12.5,24, # Perennial ice/snow is low resistance
                      19,21,60,
                      24,26,80,
@@ -109,9 +123,36 @@ resistance_nlcd <- reclassify(mt_nlcd, rcl = cs_rcl_mat)
 resistance_roads_nlcd <- cover(roads_raster, resistance_nlcd)
 NAvalue(resistance_roads_nlcd) <- -9999
 
-# writeRaster(resistance_nlcd,"../R_output_files/circuitscape/resistance/resistance_nlcd.asc",format = "ascii", overwrite = T)
-writeRaster(resistance_roads_nlcd,"../R_output_files/circuitscape/resistance/resistance_roads_nlcd.asc",format = "ascii", overwrite = T)
-# writeRaster(resistance_1,"../R_output_files/circuitscape/resistance/resistance_1.asc", format = "ascii", overwrite = T)
+writeRaster(resistance_1,"../R_output_files/circuitscape/resistance/resistance_1_mt.asc", format = "ascii", overwrite = T)
+writeRaster(resistance_nlcd,"../R_output_files/circuitscape/resistance/resistance_nlcd_mt.asc",format = "ascii", overwrite = T)
+writeRaster(resistance_roads_nlcd,"../R_output_files/circuitscape/resistance/resistance_roads_nlcd_mt.asc",format = "ascii", overwrite = T)
 ```
 
+
+### Cropping to Gallatin-Broadwater Outline
+```{r}
+all_counties <- readOGR("../R_input_files/mt_counties/County.shp")
+gb_outline <- readOGR("../R_input_files/mt_counties/gb_outline.shp")
+
+```
+
+```{r}
+ras <- resistance_1
+nm <- "resistance_1"
+
+tmp_crop <- crop(ras,extent(gb_outline))
+
+beginCluster(10)
+
+tmp <- clusterR(tmp_crop,mask,args = list(gb_outline))
+assign(paste0(nm,"_gb"),tmp)
+remove(tmp,tmp_crop)
+
+endCluster()
+
+writeRaster(resistance_1_gb,"../R_output_files/circuitscape/resistance/resistance_1_gb.asc", format = "ascii", overwrite = T)
+writeRaster(resistance_nlcd_gb,"../R_output_files/circuitscape/resistance/resistance_nlcd_gb.asc",format = "ascii", overwrite = T)
+writeRaster(resistance_roads_nlcd_gb,"../R_output_files/circuitscape/resistance/resistance_roads_nlcd_gb.asc",format = "ascii", overwrite = T)
+
+```
 

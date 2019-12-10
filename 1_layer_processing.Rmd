@@ -20,46 +20,60 @@ library(rgdal)
 library(sf)
 library(cleangeo)
 
-setwd("~/StrandedLand/stranded_repo") # Bren R server
-# setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
+# setwd("~/StrandedLand/stranded_repo") # Bren R server
+setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
 ```
 
 ### 2. Load Data
 ```{r load_data}
 
-nlcd <- raster("../")
+# Raster: Complete lower 48 NLCD raster data
+nlcd <- raster("../R_input_files/nlcd/NLCD_2016_Land_Cover_L48_20190424.img")
 
-mt_outline <- readOGR("./input_data/mt_outline/StateofMontana.shp") %>% 
+# Shapefile: State of Montana outlines
+mt_outline <- readOGR("../R_input_files/mt_outline/StateofMontana.shp") %>% 
   # Put into NLCD CRS so the layers overlap 
   spTransform(.,crs(nlcd)) 
+
+# Shapefile to simple features. Used later with stranded land layer
+mt_sf = st_as_sf(mt_outline)
   
-mt_counties <- readOGR("./input_data/mt_counties/County.shp") %>% 
+# Shapefile of Montana County outlines
+mt_counties <- readOGR("../R_input_files/mt_counties/County.shp") %>% 
   # Put into NLCD CRS so the layers overlap 
   spTransform(.,crs(nlcd)) 
 
-mt_counties_sf <- mt_counties %>% 
+# Shapefile to simple features data set: Filter Counties to keep only Gallatin and Broadwater 
+gb_sf <- mt_counties %>% 
   st_as_sf() %>% 
-  dplyr::select(NAME)
+  dplyr::select(NAME) %>% 
+  filter(NAME == "GALLATIN" | NAME == "BROADWATER")
 
-stranded <- readOGR("./input_data/stranded_shp/StrandedMaster_11_13_19.shp") %>% 
+# Write output GB shapefile to use later
+# gb_shp <- as(gb_sf,"Spatial")
+# writeOGR(gb_shp,
+#          dsn = "../R_input_files/mt_counties/",
+#          layer = "gb_outline",
+#          driver = "ESRI Shapefile")
+
+# Shapefile: Strande Land
+stranded <- readOGR("../R_input_files/stranded_shp/StrandedMaster_11_13_19.shp") %>% 
   spTransform(.,crs(nlcd))
 
+# Shapefile to simple features
 stranded_sf <- stranded %>% 
   # Put into NLCD CRS so the layers overlap 
   st_as_sf() %>% 
+  # Simplify geometries to speed up processing
+  st_simplify() %>% 
+  # Keep 'stranded' column
   dplyr::select(stranded) %>% 
+  # Select the most conservative set of stranded polygons
   filter(stranded == "1")
-
 ```
 
-### 3. Crop stranded land to Montana and to Gallatin-Broadwater
+### 3. Crop stranded land to Montana and to Gallatin-Broadwater outlines
 ```{r crop_stranded_land}
-
-# Create Montana state outline
-mt_sf = st_as_sf(mt_outline)
-
-# Filter counties sf for Gallatin and Broadwater
-gb_sf <- filter(mt_counties_sf, NAME == "GALLATIN" | NAME == "BROADWATER")
 
 # Crop the stranded shapefile to Montana 
 mt_stranded_sf = st_intersection(stranded_sf,mt_sf)
@@ -71,11 +85,43 @@ gb_stranded_sf = st_intersection(mt_stranded_sf,gb_sf)
 mt_stranded <- as(mt_stranded_sf,"Spatial")
 gb_outline <- as(gb_sf,"Spatial")
 gb_stranded <- as(gb_stranded_sf,"Spatial")
-
 ```
 
 ### 4. Crop NLCD to Montana and to Gallatin-Broadwater
-```{r crop_nlcd}
+
+
+### Crop and Resample Montana NLCD Raster
+```{r crop_resample_nlcd}
+# Crop NLCD to Montana Outline (shrink extent)
+nlcd_crop = crop(nlcd,extent(mt_outline))
+
+# Create object to resample NLCD with
+rsmpl_ext <- extent(nlcd_crop)
+rsmpl_res <- 270
+
+rsmpl_ras <- raster()
+extent(rsmpl_ras) <- rsmpl_ext
+res(rsmpl_ras) <- rsmpl_res
+
+nlcd_resample = resample(nlcd_crop,rsmpl_ras, method = "ngb")
+```
+
+### Mask resampled nlcd to MT outline
+```{r nlcd_mt_mask}
+
+timestamp()
+
+beginCluster(10) 
+nlcd_mt <- clusterR(nlcd_resample, mask, args=list(mt_outline))
+endCluster()
+
+timestamp()
+
+```
+
+
+### Reclassify NLCD Raster
+```{r nlcd_reclass}
 
 rcl_mat = c(20,22.5,20, # <50% developed: Low intensity
             22.5,24,25, # 50 - 100% developed: High intensity
@@ -86,57 +132,57 @@ rcl_mat = c(20,22.5,20, # <50% developed: Low intensity
             80,82,80, # Cultivated
             90,95,90) # Wetlands
 
-timestamp() #### 9:31:10
+# Reclassify MOntana NLCD raster
+timestamp()
 
-# Crop NLCD to Montana Outline (shrink extent)
-nlcd_crop =  crop(nlcd,extent(mt_outline))
-
-timestamp() #### 9:31:50
-
-beginCluster(10) 
-nlcd_mt <- clusterR(nlcd_crop, mask, args=list(mt_outline))
-# endCluster()
-
-timestamp() #### 9:32:40
-
-# beginCluster(10)
-# Reclassify mt NLCD raster
+beginCluster(10)
 nlcd_mt_rcl <- clusterR(nlcd_mt, reclassify,args = list(rcl_mat,include.lowest=TRUE))
-# endCluster()
+endCluster()
 
-timestamp() #### 9:33:50
+timestamp()
+```
 
+### Clean Stranded Land Geometries
+```{r clean_stranded}
 # Find bad geometrics in 
 mt_stranded_clean = cleangeo::clgeo_Clean(mt_stranded)
-collection = cleangeo::clgeo_CollectionReport(mt_stranded_clean)
-bad_polys = cleangeo::clgeo_SuspiciousFeatures(collection)
+```
 
-# beginCluster(10) # 10:23
+### Crop MT NLCD to just Stranded Land
+```{r crop_mtNLCD_toStranded}
+timestamp() #### 9:33:50
+
+beginCluster(10) # 10:23
 # Mask Montana NLCD to just Stranded Land in Montana
 nlcd_mt_stranded <- clusterR(nlcd_mt_rcl, mask, args=list(mt_stranded_clean))
-# endCluster()
+endCluster()
 
 timestamp() #### 11:33:48
+```
+
+### Crop MT NLCD to outline of GB Counties
+```{r crop_mtNLCD_toGB}
 
 beginCluster(10)
 # Crop Montana NLCD to GB extent
 nlcd_gb_crop = crop(nlcd_mt_rcl,extent(gb_outline))
 # Mask nlcd_gb_crop to GB outline
 nlcd_gb <- clusterR(nlcd_gb_crop, mask, args = list(gb_outline))
-# endCluster()
+endCluster()
 
-timestamp() #### 11:34:00
+```
 
-# beginCluster(10)
+### Crop GB NLCD to just stranded land in GB
+```{r crop_gbNLCD_toStranded}
+
+beginCluster(10)
 # Crop GB NLCD to just stranded land in GB
 nlcd_gb_stranded <- clusterR(nlcd_gb, mask, args = list(gb_stranded))
 endCluster()
 
-timestamp() #### 11:34:07
-
 ```
 
-### 5. Plot to check overlap
+### 5. Plot all to check overlap
 ```{r check_overlap}
 
 # Montana Overview
@@ -150,30 +196,29 @@ plot(nlcd_gb_stranded, col = "red", add=TRUE)
 
 ```
 
-
-### 5. Write Output Rasters
+### 6. Write Output Files
 ```{r write_output}
 
-dir.create("./output/stranded_shp/montana", recursive = T)
-dir.create("./output/stranded_shp/gb")
-dir.create("./output/nlcd/")
+# dir.create("./output/stranded_shp/montana", recursive = T)
+# dir.create("./output/stranded_shp/gb")
+# dir.create("./output/nlcd/")
 
 writeOGR(obj = mt_stranded,
-         dsn = "./output/stranded_shp/montana/",
+         dsn = "../R_output_files/stranded_shp/montana/",
          layer = "mt_stranded.shp",
          driver = "ESRI Shapefile",
          overwrite_layer = TRUE)
 
 writeOGR(obj = gb_stranded,
-         dsn = "./output/stranded_shp/gb/",
+         dsn = "../R_output_files/stranded_shp/gb/",
          layer = "gb_stranded.shp",
          driver = "ESRI Shapefile",
          overwrite_layer = TRUE)
 
-writeRaster(nlcd_mt_rcl,"./output/nlcd/nlcd_mt.tif",overwrite=TRUE)
-writeRaster(nlcd_mt_stranded,"./output/nlcd/nlcd_mt_stranded.tif",overwrite=TRUE)
-writeRaster(nlcd_gb,"./output/nlcd/nlcd_gb.tif",overwrite=TRUE)
-writeRaster(nlcd_gb_stranded,"./output/nlcd/nlcd_gb_stranded.tif",overwrite=TRUE)
+writeRaster(nlcd_mt_rcl,"../R_output_files/nlcd/nlcd_mt.tif",overwrite=TRUE)
+writeRaster(nlcd_mt_stranded,"../R_output_files/nlcd/nlcd_mt_stranded.tif",overwrite=TRUE)
+writeRaster(nlcd_gb,"../R_output_files/nlcd/nlcd_gb.tif",overwrite=TRUE)
+writeRaster(nlcd_gb_stranded,"../R_output_files/nlcd/nlcd_gb_stranded.tif",overwrite=TRUE)
 
 ```
 
