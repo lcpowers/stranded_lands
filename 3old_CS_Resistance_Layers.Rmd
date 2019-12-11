@@ -7,21 +7,6 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r}
-dem_img_files <- list.files("../R_input_files/dem/",
-                            pattern = ".img$",
-                            recursive = T,
-                            full.names = T)
-
-file.copy(from=dem_img_files, 
-          to="../R_input_files/dem/", 
-          recursive = FALSE, 
-          copy.mode = TRUE)
-
-```
-
-
-
 
 ### 2. Creating buffered roads raster
 ```{r}

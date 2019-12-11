@@ -17,14 +17,12 @@ library(rgdal)
 library(rgeos)
 library(maptools)
 
-# setwd("~/StrandedLand/stranded_repo") # Bren R server
-setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
+setwd("~/StrandedLand/stranded_repo") # Bren R server
+# setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
 ```
 
-### Data
-```{r get_data}
-
-mt_counties <- readOGR("../R_input_files/mt_counties/gb_outline.shp")
+### Montana/County Outlines and NLCD data
+```{r mt_outlines_and_NLCD}
 
 # Get MT and GB NLCD raster data
 mt_nlcd = raster("../R_output_files/nlcd/nlcd_mt.tif")
@@ -36,20 +34,66 @@ values(mt_nlcd)[values(mt_nlcd)==0] <- NA
 mt_stranded_nlcd = raster("../R_output_files/nlcd/nlcd_mt_stranded.tif")
 gb_stranded_nlcd = raster("../R_output_files/nlcd/nlcd_gb_stranded.tif")
 
+mt_counties <- readOGR("../R_input_files/mt_counties/gb_outline.shp")
+mt_outline <- readOGR("../R_input_files/mt_outline/StateofMontana.shp") %>% 
+  spTransform(.,crs(mt_nlcd))
+```
+
+
+
+### DEM Data:
+
+* Read in files
+* Merge into one raster layer
+* put into mt_nlcd CRS
+* Crop to mt_outline
+* Mask to mt_outline
+```{r get_dem}
+
+timestamp()
+dem_list <- list.files(path = "../R_input_files/dem",recursive = T,full.names = T)
+dem_rasters <- lapply(dem_list, raster)
+
+timestamp()
+# Merge each dem file into one raster layer
+dem <- do.call(merge,dem_rasters) # This takes a while...but it works!
+
+timestamp()
+# Reproject dem
+pr <- projection(mt_nlcd)
+dem_proj = projectRaster(dem,crs = pr) # This also takes a while...
+writeRaster(dem_proj,"../R_output_files/DEM/dem_reproj.tif")
+
+timestamp()
+# Crop to mt outlines
+dem_crop = crop(dem_proj,mt_outline) 
+writeRaster(dem_crop,"../R_output_files/DEM/dem_crop.tif")
+
+timestamp()
+beginCluster(14)
+dem_mask = clusterR(dem_crop,mask,args = list(mt_outline))
+endCluster()
+writeRaster(dem_mask,"../R_output_files/DEM/mt_mask.tif")
+timestamp()
+
+```
+
+
+### Get Data
+```{r get_data}
+
 # Read in Montana Transportation (Roads) shapefile
 roads = readOGR("../R_input_files/mt_transpo/Roads.shp") %>% 
   st_as_sf() %>% 
   st_simplify()
 
-```
-
-
-```{r}
 
 roads_sum <- roads %>% 
+  as.data.frame() %>% 
   select(-geometry) %>% 
   group_by(System) %>%
   tally()
 
 ```
+
 
