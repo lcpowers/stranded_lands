@@ -41,7 +41,7 @@ mt_outline <- readOGR("../R_input_files/mt_outline/StateofMontana.shp") %>%
 
 
 
-### DEM Data:
+### DEM Data: ###
 
 * Read in files
 * Merge into one raster layer
@@ -76,23 +76,28 @@ endCluster()
 writeRaster(dem_mask,"../R_output_files/DEM/mt_mask.tif")
 timestamp()
 
+timestamp()
+beginCluster(16)
+mt_slope <- clusterR(dem_mask,terrain,args = list(unit='degrees'))
+endCluster()
+writeRaster(mt_slope,"../R_output_files/DEM/slope.tif")
+
+
+timestamp()
+mt_slope_rsmpl <- resample(mt_slope,mt_nlcd)
+test_stack <- stack(mt_slope_rsmpl,mt_nlcd)
+  
+  
 ```
 
 
-### Get Data
+### Roads
 ```{r get_data}
 
 # Read in Montana Transportation (Roads) shapefile
 roads = readOGR("../R_input_files/mt_transpo/Roads.shp") %>% 
   st_as_sf() %>% 
   st_simplify()
-
-
-roads_sum <- roads %>% 
-  as.data.frame() %>% 
-  select(-geometry) %>% 
-  group_by(System) %>%
-  tally()
 
 ```
 
