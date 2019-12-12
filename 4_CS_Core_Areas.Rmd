@@ -7,7 +7,6 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-
 ### 1. Packages and data
 ```{r packages_data}
 
@@ -19,21 +18,25 @@ library(parallel)
 library(rgeos)
 library(cleangeo)
 
-# setwd("~/StrandedLand/stranded_repo") # Bren R server
-setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
+setwd("~/StrandedLand/stranded_repo") # Bren R server
+# setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
 
 # NLCD MT raster
 nlcd_mt <- raster("../R_output_files/nlcd/nlcd_mt.tif")
 
 # Gallatin-Broadwater Outline
-gb_outline <- readOGR("../R_input_files/mt_counties/gb_outline.shp")
+gb_outline <- readOGR("../R_input_files/mt_counties/gb_outline.shp") %>% 
+  st_as_sf()
+
+# Montana Outline
+mt_outline <- readOGR("../R_input_files/mt_outline/StateofMontana.shp") %>% 
+  spTransform(.,crs(gb_outline)) %>% 
+  st_as_sf()
 
 # Protected Areas Shapefile
 pad <- readOGR("../R_input_files/mt_pad/PADUS2_0Designation_MT.shp") %>% 
   spTransform(.,crs(gb_outline))
 
-plot(nlcd_mt)
-plot(pad,add=TRUE)
 ```
 
 ### 2. Creating Core Areas
@@ -50,7 +53,7 @@ pad_fltr = pad_clean %>%
   dplyr::filter(GAP_Sts == 1|GAP_Sts == 2) 
 
 # Convert GIS_Acres column to numeric and filter it
-pad_fltr$GIS_Acres = as.numeric(pad_fltr$GIS_Acres)
+# pad_fltr$GIS_Acres = as.numeric(pad_fltr$GIS_Acres)
 
 # To be used in the 
 pad_fltr$dissolve = rep(1,nrow(pad_fltr))
@@ -58,14 +61,12 @@ pad_fltr$dissolve = rep(1,nrow(pad_fltr))
 ### Back into spatial object
 pad_shp = as(pad_fltr,"Spatial") 
 
-pad_pBuf = gBuffer(pad_shp,byid=TRUE,width = 1000)
+pad_pBuf = gBuffer(pad_shp,byid=TRUE,width = 500)
 pad_union = unionSpatialPolygons(pad_pBuf,IDs = pad_pBuf@data$dissolve)
-pad_nBuf = gBuffer(pad_union,byid = TRUE,width = -1000) %>% 
+pad_nBuf = gBuffer(pad_union,byid = TRUE,width = -500) %>% 
   as(.,"SpatialPolygonsDataFrame")
 
-#### Finding centroids
-pad_nBuf_sf = st_as_sf(pad_nBuf)
-
+#### Finding centroids for Circuitscape ####
 pad_disagg_sf = disaggregate(pad_nBuf) %>% 
   st_as_sf()
 
@@ -80,6 +81,7 @@ pad_centroids = st_centroid(st_as_sf(pad_disagg)) %>%
   as(.,"Spatial") 
 
 ```
+
 
 ```{r}
 writeOGR(obj = pad_disagg, 

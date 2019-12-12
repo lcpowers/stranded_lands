@@ -1,0 +1,27 @@
+---
+title: "Stranded Land files for Connectivity"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+library(tidyverse)
+library(rgdal)
+library(raster)
+library(sf)
+library(parallel)
+library(rgeos)
+library(cleangeo)
+
+setwd("~/StrandedLand/stranded_repo") # Bren R server
+# setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
+
+stranded_gb <- raster("../R_output_files/nlcd/nlcd_gb_stranded.tif")
+stranded_mt <- raster("../R_output_files/nlcd/nlcd_mt_stranded.tif")
+
+```
+
