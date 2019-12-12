@@ -20,8 +20,8 @@ library(rgdal)
 library(sf)
 library(cleangeo)
 
-# setwd("~/StrandedLand/stranded_repo") # Bren R server
-setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
+setwd("~/StrandedLand/stranded_repo") # Bren R server
+# setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
 ```
 
 ### 2. Load Data
@@ -97,7 +97,7 @@ nlcd_crop = crop(nlcd,extent(mt_outline))
 
 # Create object to resample NLCD with
 rsmpl_ext <- extent(nlcd_crop)
-rsmpl_res <- 270
+rsmpl_res <- 90
 
 rsmpl_ras <- raster()
 extent(rsmpl_ras) <- rsmpl_ext
@@ -111,7 +111,7 @@ nlcd_resample = resample(nlcd_crop,rsmpl_ras, method = "ngb")
 
 timestamp()
 
-beginCluster(10) 
+beginCluster(14) 
 nlcd_mt <- clusterR(nlcd_resample, mask, args=list(mt_outline))
 endCluster()
 
@@ -135,7 +135,7 @@ rcl_mat = c(20,22.5,20, # <50% developed: Low intensity
 # Reclassify MOntana NLCD raster
 timestamp()
 
-beginCluster(10)
+beginCluster(14)
 nlcd_mt_rcl <- clusterR(nlcd_mt, reclassify,args = list(rcl_mat,include.lowest=TRUE))
 endCluster()
 
@@ -152,7 +152,7 @@ mt_stranded_clean = cleangeo::clgeo_Clean(mt_stranded)
 ```{r crop_mtNLCD_toStranded}
 timestamp() #### 9:33:50
 
-beginCluster(10) # 10:23
+beginCluster(14) # 10:23
 # Mask Montana NLCD to just Stranded Land in Montana
 nlcd_mt_stranded <- clusterR(nlcd_mt_rcl, mask, args=list(mt_stranded_clean))
 endCluster()
@@ -163,7 +163,7 @@ timestamp() #### 11:33:48
 ### Crop MT NLCD to outline of GB Counties
 ```{r crop_mtNLCD_toGB}
 
-beginCluster(10)
+beginCluster(14)
 # Crop Montana NLCD to GB extent
 nlcd_gb_crop = crop(nlcd_mt_rcl,extent(gb_outline))
 # Mask nlcd_gb_crop to GB outline
@@ -175,7 +175,7 @@ endCluster()
 ### Crop GB NLCD to just stranded land in GB
 ```{r crop_gbNLCD_toStranded}
 
-beginCluster(10)
+beginCluster(14)
 # Crop GB NLCD to just stranded land in GB
 nlcd_gb_stranded <- clusterR(nlcd_gb, mask, args = list(gb_stranded))
 endCluster()
@@ -185,14 +185,14 @@ endCluster()
 ### 5. Plot all to check overlap
 ```{r check_overlap}
 
-# Montana Overview
-plot(nlcd_mt)
-plot(nlcd_mt_stranded,col="red",add=TRUE)
-plot(nlcd_gb,col=topo.colors(10),add=TRUE)
-
-# Gallatin-Broadwater
-plot(nlcd_gb)
-plot(nlcd_gb_stranded, col = "red", add=TRUE)
+# # Montana Overview
+# plot(nlcd_mt)
+# plot(nlcd_mt_stranded,col="red",add=TRUE)
+# plot(nlcd_gb,col=topo.colors(10),add=TRUE)
+# 
+# # Gallatin-Broadwater
+# plot(nlcd_gb)
+# plot(nlcd_gb_stranded, col = "red", add=TRUE)
 
 ```
 
