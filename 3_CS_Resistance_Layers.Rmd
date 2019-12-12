@@ -17,8 +17,8 @@ library(rgdal)
 library(rgeos)
 library(maptools)
 
-setwd("~/StrandedLand/stranded_repo") # Bren R server
-# setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
+# setwd("~/StrandedLand/stranded_repo") # Bren R server
+setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
 ```
 
 ### Montana/County Outlines and NLCD data
@@ -70,14 +70,14 @@ dem_crop = crop(dem_proj,mt_outline)
 writeRaster(dem_crop,"../R_output_files/DEM/dem_crop.tif")
 
 timestamp()
-beginCluster(14)
+beginCluster(10)
 dem_mask = clusterR(dem_crop,mask,args = list(mt_outline))
 endCluster()
 writeRaster(dem_mask,"../R_output_files/DEM/mt_mask.tif")
 timestamp()
 
 timestamp()
-beginCluster(16)
+beginCluster(10)
 mt_slope <- clusterR(dem_mask,terrain,args = list(unit='degrees'))
 endCluster()
 writeRaster(mt_slope,"../R_output_files/DEM/slope.tif")
@@ -92,6 +92,8 @@ writeRaster(mt_slope_rsmpl,"../R_output_files/DEM/mt_slope_r.tif")
 
 
 ### Roads
+
+#### Roads Filter
 ```{r get_data}
 
 # Read in Montana Transportation (Roads) shapefile
@@ -101,20 +103,41 @@ roads = readOGR("../R_input_files/mt_transpo/Roads.shp") %>%
 
 roads_df <- roads %>% 
   as.data.frame() %>% 
-  select(-geometry) %>% 
-  group_by(System,SystemClas) %>% 
-  summarise(n())
+  select(System,SystemClas,ROADTYPE) %>% 
+  group_by(ROADTYPE,System,SystemClas) %>% 
+  summarise(n_type = n()) %>% 
+  ungroup() %>%
+  filter(ROADTYPE != 'NA') %>% 
+  arrange(-n_type)
 
 roads_fltr <- roads %>% 
-  filter(SystemClas <= 8|SystemClas==19|SystemClas >= 90) %>% 
-  select(System,SystemClas) 
+  select(System,SystemClas,ROADTYPE) %>% 
+  
 
+timestamp()
 roads_merge <- roads_fltr %>% 
   group_by(System,SystemClas) %>% 
   summarise() %>% 
   as(.,"Spatial")
+timestamp()
 
-roads_merge <- as(roads_merge,"Spatial")
+writeOGR(obj = roads_merge, 
+         dsn =  "../R_output_files/transpo/", 
+         layer = "roads_fltr_shp",
+         driver = "ESRI Shapefile")
+
+```
+
+#### Roads Buffer
+```{r}
+
+roads_merge <- readOGR("../R_output_files/transpo/roads_fltr_shp.shp")
+
+roads_merge_sf = st_as_sf(roads_merge) %>% 
+  filter(SystemClas!=95 & System != 'NA')
+
+table(roads_merge$SystemClas)
+
 ```
 
 
