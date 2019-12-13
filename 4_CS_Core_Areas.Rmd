@@ -72,7 +72,7 @@ pad_disagg_sf = disaggregate(pad_nBuf) %>%
 
 pad_disagg_sf$area <- as.numeric(st_area(pad_disagg_sf)*0.000247105)
 
-pad_disagg <- dplyr::filter(pad_disagg_sf, area > 100) %>% 
+pad_disagg <- dplyr::filter(pad_disagg_sf, area > 1000) %>% 
   as(.,"Spatial")
 
 pad_centroids = st_centroid(st_as_sf(pad_disagg)) %>% 

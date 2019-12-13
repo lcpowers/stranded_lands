@@ -21,7 +21,36 @@ setwd("~/StrandedLand/stranded_repo") # Bren R server
 # setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
 
 stranded_gb <- raster("../R_output_files/nlcd/nlcd_gb_stranded.tif")
-stranded_mt <- raster("../R_output_files/nlcd/nlcd_mt_stranded.tif")
+stranded_gb[stranded_gb>0]<-0
+nlcd_gb <- raster("../R_output_files/nlcd/nlcd_gb.tif")
+
+stranded_nlcd <- cover(stranded_gb,nlcd_gb)
+
+```
+
+Adjusting stranded land values uniformly: High, moderate, and low resistance values
+```{r stranded_UniformRes}
+# Uniform changes to Stranded Land Values
+highRes <- 100
+modRes <- 50
+lowRes <- 10
+
+# High resistance value
+stranded_highRes <- stranded_nlcd
+stranded_highRes[stranded_highRes==0]<-highRes
+
+# Mod resistance value
+stranded_modRes <- stranded_nlcd
+stranded_modRes[stranded_modRes==0]<-modRes
+
+# Low resistance value
+stranded_lowRes <- stranded_nlcd
+stranded_lowRes[stranded_lowRes==0]<-lowRes
+
+```
+
+Adjusting Stranded Land values based on surrounding landscape
+```{r stranded_relativeRes}
 
 ```
 
