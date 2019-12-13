@@ -8,21 +8,24 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
-### Packages and Working Directory
+## Packages and Working Directory
 ```{r load_packages}
 library(raster)
 library(tidyverse)
 library(sf)
 library(rgdal)
 library(rgeos)
-library(maptools)
+library(spatialEco)
 
 # setwd("~/StrandedLand/stranded_repo") # Bren R server
 setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
 ```
 
-### Montana/County Outlines and NLCD data
+## Montana/County Outlines and NLCD data
 ```{r mt_outlines_and_NLCD}
+
+nlcd <- raster("../R_input_files/nlcd/NLCD_2016_Land_Cover_L48_20190424.img")
+nlcd_proj <- crs(nlcd)
 
 # Get MT and GB NLCD raster data
 mt_nlcd = raster("../R_output_files/nlcd/nlcd_mt.tif")
@@ -35,13 +38,10 @@ mt_stranded_nlcd = raster("../R_output_files/nlcd/nlcd_mt_stranded.tif")
 gb_stranded_nlcd = raster("../R_output_files/nlcd/nlcd_gb_stranded.tif")
 
 mt_counties <- readOGR("../R_input_files/mt_counties/gb_outline.shp")
-mt_outline <- readOGR("../R_input_files/mt_outline/StateofMontana.shp") %>% 
-  spTransform(.,crs(mt_nlcd))
+mt_outline <- readOGR("../R_input_files/mt_outline/StateofMontana.shp")
 ```
 
-
-
-### DEM Data: ###
+## DEM  
 
 * Read in files
 * Merge into one raster layer
@@ -49,95 +49,119 @@ mt_outline <- readOGR("../R_input_files/mt_outline/StateofMontana.shp") %>%
 * Crop to mt_outline
 * Mask to mt_outline
 ```{r get_dem}
+mt_slope <- raster("../R_output_files/DEM/mt_slope_r.tif")
 
-timestamp()
-dem_list <- list.files(path = "../R_input_files/dem",recursive = T,full.names = T)
-dem_rasters <- lapply(dem_list, raster)
+# timestamp()
+# dem_list <- list.files(path = "../R_input_files/dem",recursive = T,full.names = T)
+# dem_rasters <- lapply(dem_list, raster)
+# 
+# timestamp()
+# # Merge each dem file into one raster layer
+# dem <- do.call(merge,dem_rasters) # This takes a while...but it works!
+# 
+# timestamp()
+# # Reproject dem
+# pr <- projection(mt_nlcd)
+# dem_proj = projectRaster(dem,crs = pr) # This also takes a while...
+# writeRaster(dem_proj,"../R_output_files/DEM/dem_reproj.tif")
 
-timestamp()
-# Merge each dem file into one raster layer
-dem <- do.call(merge,dem_rasters) # This takes a while...but it works!
+# dem_proj <- raster("../R_output_files/DEM/dem_reproj.tif")
 
-timestamp()
-# Reproject dem
-pr <- projection(mt_nlcd)
-dem_proj = projectRaster(dem,crs = pr) # This also takes a while...
-writeRaster(dem_proj,"../R_output_files/DEM/dem_reproj.tif")
+# timestamp()
+# # Crop to mt outlines
+# dem_crop = crop(dem_proj,mt_outline) 
+# writeRaster(dem_crop,"../R_output_files/DEM/dem_crop.tif")
+# 
+# timestamp()
+# beginCluster(10)
+# dem_mask = clusterR(dem_crop,mask,args = list(mt_outline))
+# endCluster()
+# writeRaster(dem_mask,"../R_output_files/DEM/mt_mask.tif")
+# timestamp()
+# 
+# timestamp()
+# beginCluster(10)
+# mt_slope <- clusterR(dem_mask,terrain,args = list(unit='degrees'))
+# endCluster()
+# writeRaster(mt_slope,"../R_output_files/DEM/slope.tif")
 
-timestamp()
-# Crop to mt outlines
-dem_crop = crop(dem_proj,mt_outline) 
-writeRaster(dem_crop,"../R_output_files/DEM/dem_crop.tif")
+# mt_slope <- raster("../R_output_files/DEM/slope.tif")
 
-timestamp()
-beginCluster(10)
-dem_mask = clusterR(dem_crop,mask,args = list(mt_outline))
-endCluster()
-writeRaster(dem_mask,"../R_output_files/DEM/mt_mask.tif")
-timestamp()
+# timestamp()
+# mt_slope_rsmpl <- resample(mt_slope,mt_nlcd)
+# writeRaster(mt_slope_rsmpl,"../R_output_files/DEM/mt_slope_r.tif")
+# timestamp()
 
-timestamp()
-beginCluster(10)
-mt_slope <- clusterR(dem_mask,terrain,args = list(unit='degrees'))
-endCluster()
-writeRaster(mt_slope,"../R_output_files/DEM/slope.tif")
-
-
-timestamp()
-mt_slope_rsmpl <- resample(mt_slope,mt_nlcd)
-writeRaster(mt_slope_rsmpl,"../R_output_files/DEM/mt_slope_r.tif")
-
-  
 ```
 
+## Roads
 
-### Roads
-
-#### Roads Filter
+### Roads Filter
 ```{r get_data}
 
-# Read in Montana Transportation (Roads) shapefile
-roads = readOGR("../R_input_files/mt_transpo/Roads.shp") %>% 
+# # Read in Montana Transportation (Roads) shapefile
+# roads = readOGR("../R_input_files/mt_transpo/Roads.shp") %>% 
+#   st_as_sf() %>% 
+#   st_simplify() 
+# 
+# roads_collector <- roads %>% 
+#   filter(ROADTYPE== "MAJOR COLLECTOR") %>% 
+#   st_buffer(.,100)
+# 
+# roads_arterial <- roads %>% 
+#   filter(str_detect(ROADTYPE,"ARTERIAL")) %>% 
+#   st_buffer(.,150)
+# 
+# roads_nhs <- roads %>% 
+#   filter(str_detect(ROADTYPE,"NHS")) %>% 
+#   st_buffer(.,200)
+# 
+# roads_fltr <- rbind(roads_nhs,roads_arterial,roads_collector)
+# 
+# timestamp() #22:41
+# roads_merge <- roads_fltr %>% 
+#   group_by(ROADTYPE) %>% 
+#   summarise() %>% 
+#   as(.,"Spatial")
+# timestamp()
+# 
+# writeOGR(obj = roads_merge, 
+#          dsn =  "../R_output_files/transpo/", 
+#          layer = "roads_fltr_shp",
+#          driver = "ESRI Shapefile",
+#          overwrite=TRUE)
+
+roads_shp <- readOGR("../R_output_files/transpo/roads_fltr_shp.shp") %>% 
   st_as_sf() %>% 
-  st_simplify() 
+  mutate(res_values = c(100,75,200,150)) %>% 
+  as(.,"SpatialLinesDataFrame") %>% 
+  spTransform(.,crs(mt_counties))
 
-roads_df <- roads %>% 
-  as.data.frame() %>% 
-  select(System,SystemClas,ROADTYPE) %>% 
-  group_by(ROADTYPE,System,SystemClas) %>% 
-  summarise(n_type = n()) %>% 
-  ungroup() %>%
-  filter(ROADTYPE != 'NA') %>% 
-  arrange(-n_type)
-
-roads_fltr <- roads %>% 
-  select(System,SystemClas,ROADTYPE) %>% 
-  
-
-timestamp()
-roads_merge <- roads_fltr %>% 
-  group_by(System,SystemClas) %>% 
-  summarise() %>% 
-  as(.,"Spatial")
-timestamp()
-
-writeOGR(obj = roads_merge, 
-         dsn =  "../R_output_files/transpo/", 
-         layer = "roads_fltr_shp",
-         driver = "ESRI Shapefile")
-
+roads_ras_l <- rasterize(roads_shp,y = mt_nlcd,field = 'res_values')
+roads_ras_f <- rasterize(roads_shp,y = mt_nlcd,field = 'res_values',fun='first')## This works to keep the weird center polygon away
 ```
 
-#### Roads Buffer
+## Wells 
 ```{r}
+wells <- readOGR("../R_input_files/wells/wells.shp") %>% 
+  spTransform(.,crs(nlcd))
 
-roads_merge <- readOGR("../R_output_files/transpo/roads_fltr_shp.shp")
+wells_sf <- st_as_sf(wells) %>% 
+  dplyr::select(Status,Type,Completed) %>% 
+  filter(Status != 'Abandoned'& Status != 'Abandoned - Unapproved'&Status != 'Shut In') %>% 
+  as(.,"Spatial")
 
-roads_merge_sf = st_as_sf(roads_merge) %>% 
-  filter(SystemClas!=95 & System != 'NA')
+# wells_df <- wells_sf %>% 
+#   as.data.frame() %>% 
+#   dplyr::select(Status,Type,Completed)
+# status_tab = as.data.frame(table(wells_df$Status))
 
-table(roads_merge$SystemClas)
+mt_nlcd_wells <- mt_nlcd
+proj4string(mt_nlcd_wells) <- nlcd_proj
+mt_nlcd_wells <- projectRaster(mt_nlcd_wells, crs = nlcd_proj)
 
+# proj4string(mt_nlcd_wells) <- crs('+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0 +units=m')
+
+kde_test <- sp.kde(wells_sf,bw = 1000,newdata = mt_nlcd_wells,standardize = TRUE)
 ```
-
 
