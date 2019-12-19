@@ -8,6 +8,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
+ore r Carville0925
 ## Packages and Working Directory
 ```{r load_packages}
 library(raster)
@@ -16,6 +17,7 @@ library(sf)
 library(rgdal)
 library(rgeos)
 library(spatialEco)
+library(parallel)
 
 # setwd("~/StrandedLand/stranded_repo") # Bren R server
 setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
@@ -27,29 +29,34 @@ setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
 nlcd <- raster("../R_input_files/nlcd/NLCD_2016_Land_Cover_L48_20190424.img")
 nlcd_proj <- crs(nlcd)
 
-# Get MT and GB NLCD raster data
+# Get MT NLCD raster data
 mt_nlcd = raster("../R_output_files/nlcd/nlcd_mt.tif")
-gb_nlcd = raster("../R_output_files/nlcd/nlcd_gb.tif")
 # Change cells with 0 value to NA
 values(mt_nlcd)[values(mt_nlcd)==0] <- NA
+
+# Get GB NLCD raster data
+gb_nlcd = raster("../R_output_files/nlcd/nlcd_gb.tif")
 
 # Get stranded NLCD data
 mt_stranded_nlcd = raster("../R_output_files/nlcd/nlcd_mt_stranded.tif")
 gb_stranded_nlcd = raster("../R_output_files/nlcd/nlcd_gb_stranded.tif")
 
-mt_counties <- readOGR("../R_input_files/mt_counties/gb_outline.shp")
-mt_outline <- readOGR("../R_input_files/mt_outline/StateofMontana.shp")
+mt_counties <- readOGR("../R_input_files/mt_counties/gb_outline.shp")%>% 
+  spTransform(.,crs(nlcd))
+mt_outline <- readOGR("../R_input_files/mt_outline/StateofMontana.shp") %>% 
+  spTransform(.,crs(nlcd))
 ```
 
-## DEM  
+## DEM/Slope
 
 * Read in files
 * Merge into one raster layer
 * put into mt_nlcd CRS
 * Crop to mt_outline
 * Mask to mt_outline
+
 ```{r get_dem}
-mt_slope <- raster("../R_output_files/DEM/mt_slope_r.tif")
+# mt_slope <- raster("../R_output_files/DEM/mt_slope_r.tif")
 
 # timestamp()
 # dem_list <- list.files(path = "../R_input_files/dem",recursive = T,full.names = T)
@@ -61,107 +68,260 @@ mt_slope <- raster("../R_output_files/DEM/mt_slope_r.tif")
 # 
 # timestamp()
 # # Reproject dem
-# pr <- projection(mt_nlcd)
-# dem_proj = projectRaster(dem,crs = pr) # This also takes a while...
-# writeRaster(dem_proj,"../R_output_files/DEM/dem_reproj.tif")
-
+# dem_proj = projectRaster(dem,crs = nlcd_proj) # This also takes a while...
+# writeRaster(dem_proj,"../R_output_files/DEM/dem_reproj.tif", overwrite = TRUE)
+# 
 # dem_proj <- raster("../R_output_files/DEM/dem_reproj.tif")
-
-# timestamp()
-# # Crop to mt outlines
-# dem_crop = crop(dem_proj,mt_outline) 
-# writeRaster(dem_crop,"../R_output_files/DEM/dem_crop.tif")
 # 
 # timestamp()
+# # Crop to mt outlines
+# dem_crop = crop(dem_proj,mt_outline)
+# writeRaster(dem_crop,"../R_output_files/DEM/dem_crop.tif", overwrite = T)
+# 
+# timestamp()
+# 
 # beginCluster(10)
 # dem_mask = clusterR(dem_crop,mask,args = list(mt_outline))
 # endCluster()
-# writeRaster(dem_mask,"../R_output_files/DEM/mt_mask.tif")
-# timestamp()
+# writeRaster(dem_mask,"../R_output_files/DEM/mt_mask.tif", overwrite = T)
 # 
 # timestamp()
+# 
 # beginCluster(10)
 # mt_slope <- clusterR(dem_mask,terrain,args = list(unit='degrees'))
 # endCluster()
-# writeRaster(mt_slope,"../R_output_files/DEM/slope.tif")
-
-# mt_slope <- raster("../R_output_files/DEM/slope.tif")
-
+# writeRaster(mt_slope,"../R_output_files/DEM/slope.tif", overwrite = T)
+# 
+# mt_slope_d <- raster("../R_output_files/DEM/slope.tif")
+# 
 # timestamp()
-# mt_slope_rsmpl <- resample(mt_slope,mt_nlcd)
-# writeRaster(mt_slope_rsmpl,"../R_output_files/DEM/mt_slope_r.tif")
+# mt_slope_rsmpl <- resample(mt_slope_d,mt_nlcd)
+# writeRaster(mt_slope_rsmpl,"../R_output_files/DEM/mt_slope_r.tif", overwrite = T)
+# writeRaster(mt_slope_rsmpl,"../R_output_files/circuitscape/resistance_variables/mt_slope_r.tif", overwrite = T)
 # timestamp()
 
+mt_slope <- raster("../R_output_files/DEM/mt_slope_r.tif")
 ```
+
+
+## Canopy cover
+```{r canopy_cover}
+#
+# canopy <- raster("../R_input_files/nlcd_treecanopy/nlcd_2016_treecanopy_2019_08_31.img")
+#
+# canopy_crop <- crop(canopy,extent(mt_nlcd))
+# canopy_rsmpl <- resample(canopy_mask,mt_nlcd)
+# canopy_mask <- mask(canopy_rsmpl,mt_nlcd)
+
+# writeRaster(canopy_mask,"../R_output_files/circuitscape/resistance_variables/canopy_cover.tif",overwrite=TRUE)
+
+canopy_res <- raster("../R_output_files/circuitscape/resistance_variables/canopy_cover.tif")
+```
+
+
+## Imperviousness
+```{r}
+
+impervious <- raster("../R_input_files/nlcd_impervious/NLCD_2016_Impervious_L48_20190405.img")
+
+impervious_crop <- crop(impervious,extent(mt_nlcd))
+impervious_rsmpl <- resample(impervious_crop,mt_nlcd)
+impervious_mask <- mask(impervious_rsmpl,mt_nlcd)
+
+writeRaster(impervious_mask, "../R_output_files/circuitscape/resistance_variables/imperviousness.tif",overwrite=TRUE)
+
+impervious_res <- raster("../R_output_files/circuitscape/resistance_variables/imperviousness.tif")
+```
+
 
 ## Roads
 
 ### Roads Filter
 ```{r get_data}
+# 
+# Read in Montana Transportation (Roads) shapefile
+roads = readOGR("../R_input_files/mt_transpo/Roads.shp") %>%
+  st_as_sf() %>%
+  st_simplify()
 
-# # Read in Montana Transportation (Roads) shapefile
-# roads = readOGR("../R_input_files/mt_transpo/Roads.shp") %>% 
-#   st_as_sf() %>% 
-#   st_simplify() 
-# 
-# roads_collector <- roads %>% 
-#   filter(ROADTYPE== "MAJOR COLLECTOR") %>% 
-#   st_buffer(.,100)
-# 
-# roads_arterial <- roads %>% 
-#   filter(str_detect(ROADTYPE,"ARTERIAL")) %>% 
-#   st_buffer(.,150)
-# 
-# roads_nhs <- roads %>% 
-#   filter(str_detect(ROADTYPE,"NHS")) %>% 
-#   st_buffer(.,200)
-# 
-# roads_fltr <- rbind(roads_nhs,roads_arterial,roads_collector)
-# 
-# timestamp() #22:41
-# roads_merge <- roads_fltr %>% 
-#   group_by(ROADTYPE) %>% 
-#   summarise() %>% 
-#   as(.,"Spatial")
-# timestamp()
-# 
-# writeOGR(obj = roads_merge, 
-#          dsn =  "../R_output_files/transpo/", 
-#          layer = "roads_fltr_shp",
-#          driver = "ESRI Shapefile",
-#          overwrite=TRUE)
+roads_collector <- roads %>%
+  filter(ROADTYPE== "MAJOR COLLECTOR") %>%
+  st_buffer(.,100)
 
-roads_shp <- readOGR("../R_output_files/transpo/roads_fltr_shp.shp") %>% 
-  st_as_sf() %>% 
-  mutate(res_values = c(100,75,200,150)) %>% 
-  as(.,"SpatialLinesDataFrame") %>% 
-  spTransform(.,crs(mt_counties))
+roads_arterial <- roads %>%
+  filter(str_detect(ROADTYPE,"ARTERIAL")) %>%
+  st_buffer(.,150)
 
-roads_ras_l <- rasterize(roads_shp,y = mt_nlcd,field = 'res_values')
-roads_ras_f <- rasterize(roads_shp,y = mt_nlcd,field = 'res_values',fun='first')## This works to keep the weird center polygon away
+roads_nhs <- roads %>%
+  filter(str_detect(ROADTYPE,"NHS")) %>%
+  st_buffer(.,200)
+
+roads_fltr <- rbind(roads_nhs,roads_arterial,roads_collector)
+
+timestamp() # 15:26
+roads_merge <- roads_fltr %>%
+  group_by(ROADTYPE) %>%
+  summarise() %>%
+  as(.,"Spatial")
+timestamp() # 15:30
+
+writeOGR(obj = roads_merge,
+         dsn =  "../R_output_files/transpo/",
+         layer = "roads_fltr_shp",
+         driver = "ESRI Shapefile",
+         overwrite=TRUE)
+
+roads_shp <- readOGR("../R_output_files/transpo/roads_fltr_shp.shp") %>%
+  st_as_sf() %>%
+  mutate(res_values = c(500,250,1000,750)) %>%
+  as(.,"Spatial") %>%
+  as(.,"SpatialLinesDataFrame") %>%
+  spTransform(.,crs(nlcd))
+
+# roads_ras_l <- rasterize(roads_shp,y = mt_nlcd,field = 'res_values')
+roads_ras_f <- rasterize(roads_shp,y = mt_nlcd,field = 'res_values',fun='first') ## This works to keep the weird center polygon away
+
+writeRaster(roads_ras_f,"../R_output_files/circuitscape/resistance_variables/roads_res.tif")
+
+roads_res <- raster("../R_output_files/circuitscape/resistance_variables/roads_res.tif")
 ```
 
 ## Wells 
 ```{r}
-wells <- readOGR("../R_input_files/wells/wells.shp") %>% 
-  spTransform(.,crs(nlcd))
+# wells <- readOGR("../R_input_files/wells/wells.shp") %>% 
+#   spTransform(.,crs(nlcd))
+# 
+# wells_fltr <- st_as_sf(wells) %>% 
+#   dplyr::select(Status,Type,Completed) %>% 
+#   filter(Status != 'Abandoned'& Status != 'Abandoned - Unapproved'&Status != 'Shut In') %>% 
+#   as(.,"Spatial")
+# 
+# # wells_df <- wells_sf %>% 
+# #   as.data.frame() %>% 
+# #   dplyr::select(Status,Type,Completed)
+# # status_tab = as.data.frame(table(wells_df$Status))
+# 
+# mt_nlcd_wells <- mt_nlcd
+# 
+# timestamp()
+# kde_test <- sp.kde(wells_fltr,bw = 1000,newdata = mt_nlcd_wells,standardize = TRUE, scale.factor = 1000)
+# writeRaster(kde_test,"../R_output_files/circuitscape/resistance_variables/wells_kde.tif", overwrite=TRUE)
+# timestamp()
 
-wells_sf <- st_as_sf(wells) %>% 
-  dplyr::select(Status,Type,Completed) %>% 
-  filter(Status != 'Abandoned'& Status != 'Abandoned - Unapproved'&Status != 'Shut In') %>% 
-  as(.,"Spatial")
+# well_kde <- raster("../R_output_files/circuitscape/resistance_variables/wells_kde.tif")
+```
 
-# wells_df <- wells_sf %>% 
-#   as.data.frame() %>% 
-#   dplyr::select(Status,Type,Completed)
-# status_tab = as.data.frame(table(wells_df$Status))
+## Mines
+```{r mines_kde}
+# 
+# mines_sf <- readOGR("../R_input_files/mines/mines.shp") %>% 
+#   spTransform(.,crs(nlcd)) %>% 
+#   st_as_sf() 
+# 
+# devstatMines <- mines_sf %>% 
+#   filter(dev_stat == "Producer"|dev_stat == "Plant") %>% 
+#   as(.,"Spatial") %>% 
+#   crop(.,extent(mt_outline))
+# 
+# mt_nlcd_mines <- mt_nlcd
+# 
+# timestamp()
+# mine_kde <- sp.kde(devstatMines,bw = 1000,newdata = mt_nlcd_mines,standardize = TRUE, scale.factor = 1000)
+# mine_kde2 <- sp.kde(devstatMines,bw = 1000,newdata = mt_nlcd_mines,standardize = TRUE, scale.factor = 1000)
+# writeRaster(mine_kde,"../R_output_files/circuitscape/resistance_variables/mines_kde.tif", overwrite=TRUE)
+# timestamp()
+# mine_kde <- raster("../R_output_files/circuitscape/resistance_variables/mines_kde.tif")
+```
 
-mt_nlcd_wells <- mt_nlcd
-proj4string(mt_nlcd_wells) <- nlcd_proj
-mt_nlcd_wells <- projectRaster(mt_nlcd_wells, crs = nlcd_proj)
+## Rivers
+```{r}
 
-# proj4string(mt_nlcd_wells) <- crs('+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0 +units=m')
+rivers_sf <- readOGR("../R_input_files/mt_hydrography/NHDArea.shp") %>%
+  st_as_sf()
 
-kde_test <- sp.kde(wells_sf,bw = 1000,newdata = mt_nlcd_wells,standardize = TRUE)
+rivers_fltr <- rivers_sf %>%
+  mutate(avg_width = Shape_Area/Shape_Leng) %>%
+  filter(avg_width > 50 & Shape_Leng > 500) %>%
+  mutate(res_value = 750) %>%
+  as(.,"Spatial") %>%
+  spTransform(.,crs(mt_nlcd))
+
+rivers_ras <- rasterize(rivers_fltr,mt_nlcd,field = "res_value")
+
+writeRaster(rivers_ras, "../R_output_files/circuitscape/resistance_variables/rivers_res.tif")
+
+rivers_res <- raster("../R_output_files/circuitscape/resistance_variables/rivers_res.tif")
+```
+
+## NLCD Reclass
+```{r}
+# 
+# cs_rcl_mat <- c(-Inf,11.5,NA,
+#                      11.5,12.5,100, # Ice and Snow
+#                      19,21,500, # Low development
+#                      24,26,1000, # High Development
+#                      29,31,250, # Barren
+#                      39,41,10, # Forest
+#                      49,51,50, # Shrubland 
+#                      69,71,200, # Grassland
+#                      79,81,800, # Cultivated
+#                      89,91,100) # Wetlands
+# 
+# nlcd_res <- reclassify(mt_nlcd,cs_rcl_mat)
+# writeRaster(nlcd_res,"../R_output_files/circuitscape/resistance_variables/nlcd_res.tif", overwrite=T)
+
+nlcd_res <- raster("../R_output_files/circuitscape/resistance_variables/nlcd_res.tif")
+```
+
+
+## Putting it all together
+
+```{r}
+
+# Land cover
+nlcd_res <- raster("../R_output_files/circuitscape/resistance_variables/nlcd_res.tif")
+
+# Roads 
+roads_res <- raster("../R_output_files/circuitscape/resistance_variables/roads_res.tif")
+
+# Imperviousness 
+impervious_res <- raster("../R_output_files/circuitscape/resistance_variables/imperviousness.tif")
+impervious_res <- (impervious_res/100)*1000
+
+# Rivers
+rivers_res <- raster("../R_output_files/circuitscape/resistance_variables/rivers_res.tif")
+res_stack <- stack(nlcd_res, roads_res, impervious_res, rivers_res)
+max_resistance <- max(res_stack,na.rm = TRUE)
+
+max_res_trans <- raster.transformation(max_resistance,trans = "stretch",smin = 0.1,smax = 1000)
+
+# Canopy Cover  
+canopy_res <- raster("../R_output_files/circuitscape/resistance_variables/canopy_cover.tif") 
+max_canopy <- cellStats(x = canopy_res,stat = max)
+canopy_res <- canopy_res/max_canopy
+
+# Slope 
+slope_res = raster("../R_output_files/circuitscape/resistance_variables/mt_slope_r.tif")
+max_slope <- cellStats(x = slope_res,stat = max)
+slope_res = slope_res/max_slope
+
+max_res_stack_adj <- max_res_trans*(1-slope_res)*(1+canopy_res)
+
+resistance_final <- mask(max_res_stack_adj,mt_nlcd)
+NAvalue(resistance_final) <- -9999
+
+# Create object to resample NLCD with
+rsmpl_ext <- extent(mt_nlcd)
+rsmpl_res <- 270
+
+rsmpl_ras <- raster()
+extent(rsmpl_ras) <- rsmpl_ext
+res(rsmpl_ras) <- rsmpl_res
+
+resistance_resample = resample(resistance_final, rsmpl_ras)
+NAvalue(resistance_resample) = -9999
+
+# writeRaster(max_res_trans,"../R_output_files/circuitscape/resistance/resistance_all.tif",overwrite=T)
+writeRaster(resistance_resample,"../R_output_files/circuitscape/resistance/resistance_FINAL.asc", format = "ascii",overwrite=T)
 ```
 

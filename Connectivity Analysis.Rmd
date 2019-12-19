@@ -1,0 +1,30 @@
+---
+title: "Connectivity Analysis"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(rgdal)
+library(raster)
+
+mt_nlcd <- raster("../R_output_files/nlcd/nlcd_mt.tif")
+mt_stranded <- raster("../R_output_files/nlcd/nlcd_mt_stranded.tif")
+cwd <- raster("../CS_output/Cost-weighted Distance from Least Cost Path1.tif")
+```
+
+```{r}
+
+mt_stranded_pts <- rasterToPoints(mt_stranded, spatial = TRUE)
+mt_stranded_cwd <- extract(cwd,mt_stranded_pts)
+mt_random_cwd <- as.vector(sampleRandom(cwd,size = length(mt_stranded_pts),na.rm=T))
+
+str_mean <- mean(mt_stranded_cwd,na.rm = T)
+rand_mean <- mean(mt_random_cwd)
+
+t.test(mt_stranded_cwd,y = mt_random_cwd, alternative = "greater")
+```
+

@@ -19,9 +19,10 @@ library(raster)
 library(rgdal)
 library(sf)
 library(cleangeo)
+library(parallel)
 
-setwd("~/StrandedLand/stranded_repo") # Bren R server
-# setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
+# setwd("~/StrandedLand/stranded_repo") # Bren R server
+setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
 ```
 
 ### 2. Load Data
@@ -50,11 +51,11 @@ gb_sf <- mt_counties %>%
   filter(NAME == "GALLATIN" | NAME == "BROADWATER")
 
 # Write output GB shapefile to use later
-# gb_shp <- as(gb_sf,"Spatial")
-# writeOGR(gb_shp,
-#          dsn = "../R_input_files/mt_counties/",
-#          layer = "gb_outline",
-#          driver = "ESRI Shapefile")
+gb_shp <- as(gb_sf,"Spatial")
+writeOGR(gb_shp,
+         dsn = "../R_input_files/mt_counties/",
+         layer = "gb_outline",
+         driver = "ESRI Shapefile", overwrite = TRUE)
 
 # Shapefile: Strande Land
 stranded <- readOGR("../R_input_files/stranded_shp/StrandedMaster_11_13_19.shp") %>% 
@@ -78,7 +79,7 @@ stranded_sf <- stranded %>%
 # Crop the stranded shapefile to Montana 
 mt_stranded_sf = st_intersection(stranded_sf,mt_sf)
 
-# Crop the mt_stranded file to Gallatin-Broadwater
+# Crop the mt_stranded file to Gallatin-Broadwatercover_
 gb_stranded_sf = st_intersection(mt_stranded_sf,gb_sf)
 
 # Convert stranded sf objects back to SPDFs to use as raster masks
@@ -97,21 +98,23 @@ nlcd_crop = crop(nlcd,extent(mt_outline))
 
 # Create object to resample NLCD with
 rsmpl_ext <- extent(nlcd_crop)
-rsmpl_res <- 90
+rsmpl_res <- 270
 
-rsmpl_ras <- raster()
+rsmpl_ras <- raster(nlcd_crop)
 extent(rsmpl_ras) <- rsmpl_ext
 res(rsmpl_ras) <- rsmpl_res
 
-nlcd_resample = resample(nlcd_crop,rsmpl_ras, method = "ngb")
+nlcd_resample = resample(nlcd_crop, rsmpl_ras, method = "ngb")
+writeRaster(nlcd_resample,"../R_output_files/nlcd/nlcd_resample_90.tif",overwrite=TRUE)
 ```
 
 ### Mask resampled nlcd to MT outline
 ```{r nlcd_mt_mask}
+n_cores <- detectCores()-6 
 
 timestamp()
 
-beginCluster(14) 
+beginCluster(n_cores) 
 nlcd_mt <- clusterR(nlcd_resample, mask, args=list(mt_outline))
 endCluster()
 
@@ -125,17 +128,17 @@ timestamp()
 
 rcl_mat = c(20,22.5,20, # <50% developed: Low intensity
             22.5,24,25, # 50 - 100% developed: High intensity
-            30,31,30, # Barren
+            30,32,30, # Barren
             40,44,40, # Forest
-            50,52,50, # Shrubland
-            70,74,70, # Herbaceous
-            80,82,80, # Cultivated
-            90,95,90) # Wetlands
+            50,53,50, # Shrubland
+            70,74,70, # Grassland
+            80,83,80, # Cultivated
+            89,96,90) # Wetlands
 
-# Reclassify MOntana NLCD raster
+# Reclassify Montana NLCD raster
 timestamp()
 
-beginCluster(14)
+beginCluster(n_cores)
 nlcd_mt_rcl <- clusterR(nlcd_mt, reclassify,args = list(rcl_mat,include.lowest=TRUE))
 endCluster()
 
@@ -152,7 +155,7 @@ mt_stranded_clean = cleangeo::clgeo_Clean(mt_stranded)
 ```{r crop_mtNLCD_toStranded}
 timestamp() #### 9:33:50
 
-beginCluster(14) # 10:23
+beginCluster(n_cores) # 10:23
 # Mask Montana NLCD to just Stranded Land in Montana
 nlcd_mt_stranded <- clusterR(nlcd_mt_rcl, mask, args=list(mt_stranded_clean))
 endCluster()
@@ -163,7 +166,7 @@ timestamp() #### 11:33:48
 ### Crop MT NLCD to outline of GB Counties
 ```{r crop_mtNLCD_toGB}
 
-beginCluster(14)
+beginCluster(n_cores)
 # Crop Montana NLCD to GB extent
 nlcd_gb_crop = crop(nlcd_mt_rcl,extent(gb_outline))
 # Mask nlcd_gb_crop to GB outline
@@ -175,7 +178,7 @@ endCluster()
 ### Crop GB NLCD to just stranded land in GB
 ```{r crop_gbNLCD_toStranded}
 
-beginCluster(14)
+beginCluster(n_cores)
 # Crop GB NLCD to just stranded land in GB
 nlcd_gb_stranded <- clusterR(nlcd_gb, mask, args = list(gb_stranded))
 endCluster()

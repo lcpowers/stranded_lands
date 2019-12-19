@@ -18,8 +18,8 @@ library(parallel)
 library(rgeos)
 library(cleangeo)
 
-setwd("~/StrandedLand/stranded_repo") # Bren R server
-# setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
+# setwd("~/StrandedLand/stranded_repo") # Bren R server
+setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
 
 # NLCD MT raster
 nlcd_mt <- raster("../R_output_files/nlcd/nlcd_mt.tif")
@@ -30,12 +30,12 @@ gb_outline <- readOGR("../R_input_files/mt_counties/gb_outline.shp") %>%
 
 # Montana Outline
 mt_outline <- readOGR("../R_input_files/mt_outline/StateofMontana.shp") %>% 
-  spTransform(.,crs(gb_outline)) %>% 
+  spTransform(.,crs(nlcd_mt)) %>% 
   st_as_sf()
 
 # Protected Areas Shapefile
 pad <- readOGR("../R_input_files/mt_pad/PADUS2_0Designation_MT.shp") %>% 
-  spTransform(.,crs(gb_outline))
+  spTransform(.,crs(nlcd_mt))
 
 ```
 
@@ -66,33 +66,28 @@ pad_union = unionSpatialPolygons(pad_pBuf,IDs = pad_pBuf@data$dissolve)
 pad_nBuf = gBuffer(pad_union,byid = TRUE,width = -500) %>% 
   as(.,"SpatialPolygonsDataFrame")
 
-#### Finding centroids for Circuitscape ####
+#### Individual polygons ####
 pad_disagg_sf = disaggregate(pad_nBuf) %>% 
-  st_as_sf()
+  st_as_sf() 
 
 pad_disagg_sf$area <- as.numeric(st_area(pad_disagg_sf)*0.000247105)
 
-pad_disagg <- dplyr::filter(pad_disagg_sf, area > 1000) %>% 
+pad_disagg <- dplyr::filter(pad_disagg_sf, area > 10000) %>% 
+  mutate(Core_ID = seq(1:nrow(.))) %>% 
   as(.,"Spatial")
 
 pad_centroids = st_centroid(st_as_sf(pad_disagg)) %>% 
-  mutate(ras_value = 1) %>%
+  mutate(ras_value = 1,
+         core_id = seq(1:n())) %>%
   dplyr::select(ras_value) %>% 
   as(.,"Spatial") 
-
 ```
 
 
 ```{r}
 writeOGR(obj = pad_disagg, 
          dsn =  "../R_output_files/circuitscape/core_areas/pad_shp/",
-         layer = "pad_union",
-         driver = "ESRI Shapefile",
-         overwrite = T)
-
-writeOGR(obj = pad_shp, 
-         dsn =  "../R_output_files/circuitscape/core_areas/pad_shp/",
-         layer = "pad_polygons",
+         layer = "core_areas_shp",
          driver = "ESRI Shapefile",
          overwrite = T)
 
@@ -106,9 +101,9 @@ writeOGR(obj = pad_centroids,
 ### Rasterize centroids
 ```{r}
 
-center_ras = rasterize(pad_centroids, nlcd_mt, value = 1)
-NAvalue(center_ras) <- 9999
-writeRaster(center_ras$ras_value,"../R_output_files/circuitscape/center.asc",format = "ascii",overwrite=TRUE)
+center_ras = rasterize(pad_centroids, nlcd_mt, field = 1,background = NA)
+NAvalue(center_ras) <- -9999
+writeRaster(center_ras,"../R_output_files/circuitscape/center.asc",format = "ascii",overwrite=TRUE)
 
 ```
 
