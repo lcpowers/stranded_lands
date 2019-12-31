@@ -7,7 +7,9 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r}
+
+### 1. Load packages and data
+```{r load_data}
 
 library(tidyverse)
 library(rgdal)
@@ -17,36 +19,65 @@ library(parallel)
 library(rgeos)
 library(cleangeo)
 
-setwd("~/StrandedLand/stranded_repo") # Bren R server
-# setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
+# setwd("~/StrandedLand/stranded_repo") # Bren R server
+setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
 
+# NLCD-Stranded in Gallatin-Broadwater
 stranded_gb <- raster("../R_output_files/nlcd/nlcd_gb_stranded.tif")
-stranded_gb[stranded_gb>0]<-0
+
+# NLCD in Gallatin-Broadwater
 nlcd_gb <- raster("../R_output_files/nlcd/nlcd_gb.tif")
 
-stranded_nlcd <- cover(stranded_gb,nlcd_gb)
-
+# Resistance raster
+res_ras <- raster("../R_output_files/circuitscape/resistance/resistance_FINAL_2.asc")
 ```
 
-Adjusting stranded land values uniformly: High, moderate, and low resistance values
+### 2. Prepare resistance raster to have stranded land cell value changed uniformly
+```{r prepare_resistance_raster}
+# Crop resistance layer to the Gallatin-Broadwater extent layers
+res_ras_gb_crop <- crop(res_ras,extent(nlcd_gb))
+
+# Mask the cropped layer to the GB outline
+res_ras_gb <- mask(res_ras_gb_crop,nlcd_gb)
+
+# Plot to visually check
+plot(res_ras_gb)
+
+# Check minimum and maximum value to make sure that the stranded land cells are set to something outside of the minimum and max and therefore possile to distinguish from other cells
+res_ras_gb
+
+stranded_gb[stranded_gb>0] = -1
+
+stranded_nlcd <- cover(stranded_gb,res_ras_gb)
+```
+
+
+### 3. Adjusting stranded land values uniformly: High, moderate, and low resistance values
 ```{r stranded_UniformRes}
 # Uniform changes to Stranded Land Values
-highRes <- 100
-modRes <- 50
+resistance_q <- quantile(res_ras)
+
+highRes <- 1000
+modRes <- 500
 lowRes <- 10
 
 # High resistance value
 stranded_highRes <- stranded_nlcd
-stranded_highRes[stranded_highRes==0]<-highRes
+stranded_highRes[stranded_highRes==-1]<-highRes
 
 # Mod resistance value
 stranded_modRes <- stranded_nlcd
-stranded_modRes[stranded_modRes==0]<-modRes
+stranded_modRes[stranded_modRes==-1]<-modRes
 
 # Low resistance value
 stranded_lowRes <- stranded_nlcd
-stranded_lowRes[stranded_lowRes==0]<-lowRes
+stranded_lowRes[stranded_lowRes==-1]<-lowRes
 
+dir.create("../R_output_files/circuitscape/gb_resistance")
+writeRaster(res_ras_gb,"../R_output_files/circuitscape/gb_resistance/gb_res_null.asc",format='ascii')
+writeRaster(stranded_highRes,"../R_output_files/circuitscape/gb_resistance/gb_res_strandedHigh.asc",format = 'ascii')
+writeRaster(stranded_modRes,"../R_output_files/circuitscape/gb_resistance/gb_res_strandedMod.asc",format = 'ascii')
+writeRaster(stranded_lowRes,"../R_output_files/circuitscape/gb_resistance/gb_strandedLow.asc", format = 'ascii')
 ```
 
 Adjusting Stranded Land values based on surrounding landscape
