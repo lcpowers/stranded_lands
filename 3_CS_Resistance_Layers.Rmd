@@ -7,8 +7,6 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-
-ore r Carville0925
 ## Packages and Working Directory
 ```{r load_packages}
 library(raster)
@@ -26,10 +24,12 @@ setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
 ## Montana/County Outlines and NLCD data
 ```{r mt_outlines_and_NLCD}
 
+# Read in orignial NLCD resistance layer to use CRS for all other layers
 nlcd <- raster("../R_input_files/nlcd/NLCD_2016_Land_Cover_L48_20190424.img")
+# Define NLCD CRS as a variable
 nlcd_proj <- crs(nlcd)
 
-# Get MT NLCD raster data
+# Get MT NLCD raster data, developed in Rmarkdown document 1_layer_processing.Rmd
 mt_nlcd = raster("../R_output_files/nlcd/nlcd_mt.tif")
 # Change cells with 0 value to NA
 values(mt_nlcd)[values(mt_nlcd)==0] <- NA
@@ -41,8 +41,11 @@ gb_nlcd = raster("../R_output_files/nlcd/nlcd_gb.tif")
 mt_stranded_nlcd = raster("../R_output_files/nlcd/nlcd_mt_stranded.tif")
 gb_stranded_nlcd = raster("../R_output_files/nlcd/nlcd_gb_stranded.tif")
 
+# Get MT counties shapefile
 mt_counties <- readOGR("../R_input_files/mt_counties/gb_outline.shp")%>% 
   spTransform(.,crs(nlcd))
+
+# Get MT outline shapefile
 mt_outline <- readOGR("../R_input_files/mt_outline/StateofMontana.shp") %>% 
   spTransform(.,crs(nlcd))
 ```
@@ -91,14 +94,14 @@ mt_outline <- readOGR("../R_input_files/mt_outline/StateofMontana.shp") %>%
 # mt_slope <- clusterR(dem_mask,terrain,args = list(unit='degrees'))
 # endCluster()
 # writeRaster(mt_slope,"../R_output_files/DEM/slope.tif", overwrite = T)
-# 
-# mt_slope_d <- raster("../R_output_files/DEM/slope.tif")
-# 
-# timestamp()
-# mt_slope_rsmpl <- resample(mt_slope_d,mt_nlcd)
-# writeRaster(mt_slope_rsmpl,"../R_output_files/DEM/mt_slope_r.tif", overwrite = T)
-# writeRaster(mt_slope_rsmpl,"../R_output_files/circuitscape/resistance_variables/mt_slope_r.tif", overwrite = T)
-# timestamp()
+
+mt_slope_d <- raster("../R_output_files/DEM/slope.tif")
+
+timestamp()
+mt_slope_rsmpl <- resample(mt_slope_d,mt_nlcd)
+writeRaster(mt_slope_rsmpl,"../R_output_files/DEM/mt_slope_r.tif", overwrite = T)
+writeRaster(mt_slope_rsmpl,"../R_output_files/circuitscape/resistance_variables/mt_slope_r.tif", overwrite = T)
+timestamp()
 
 mt_slope <- raster("../R_output_files/DEM/mt_slope_r.tif")
 ```
@@ -106,29 +109,32 @@ mt_slope <- raster("../R_output_files/DEM/mt_slope_r.tif")
 
 ## Canopy cover
 ```{r canopy_cover}
-#
-# canopy <- raster("../R_input_files/nlcd_treecanopy/nlcd_2016_treecanopy_2019_08_31.img")
-#
-# canopy_crop <- crop(canopy,extent(mt_nlcd))
-# canopy_rsmpl <- resample(canopy_mask,mt_nlcd)
-# canopy_mask <- mask(canopy_rsmpl,mt_nlcd)
 
-# writeRaster(canopy_mask,"../R_output_files/circuitscape/resistance_variables/canopy_cover.tif",overwrite=TRUE)
+## This reads in with min/max values from 0 to 255, not 0 - 100 like the NLCD legend says
+canopy <- raster("../R_input_files/nlcd_treecanopy/nlcd_2016_treecanopy_2019_08_31.img")
+canopy_max <- cellStats(x = canopy,stat = 'max')
+canopy_prop <- canopy/canopy_max
+
+canopy_crop <- crop(canopy,extent(mt_nlcd))
+canopy_rsmpl <- resample(canopy_crop,mt_nlcd)
+canopy_mask <- mask(canopy_rsmpl,mt_nlcd)
+
+writeRaster(canopy_mask,"../R_output_files/circuitscape/resistance_variables/canopy_cover.tif",overwrite=TRUE)
 
 canopy_res <- raster("../R_output_files/circuitscape/resistance_variables/canopy_cover.tif")
 ```
 
 
 ## Imperviousness
-```{r}
+```{r imperviousness}
 
-impervious <- raster("../R_input_files/nlcd_impervious/NLCD_2016_Impervious_L48_20190405.img")
-
-impervious_crop <- crop(impervious,extent(mt_nlcd))
-impervious_rsmpl <- resample(impervious_crop,mt_nlcd)
-impervious_mask <- mask(impervious_rsmpl,mt_nlcd)
-
-writeRaster(impervious_mask, "../R_output_files/circuitscape/resistance_variables/imperviousness.tif",overwrite=TRUE)
+# impervious <- raster("../R_input_files/nlcd_impervious/NLCD_2016_Impervious_L48_20190405.img")
+# 
+# impervious_crop <- crop(impervious,extent(mt_nlcd))
+# impervious_rsmpl <- resample(impervious_crop,mt_nlcd)
+# impervious_mask <- mask(impervious_rsmpl,mt_nlcd)
+# 
+# writeRaster(impervious_mask, "../R_output_files/circuitscape/resistance_variables/imperviousness.tif",overwrite=TRUE)
 
 impervious_res <- raster("../R_output_files/circuitscape/resistance_variables/imperviousness.tif")
 ```
@@ -138,52 +144,96 @@ impervious_res <- raster("../R_output_files/circuitscape/resistance_variables/im
 
 ### Roads Filter
 ```{r get_data}
-# 
+
 # Read in Montana Transportation (Roads) shapefile
 roads = readOGR("../R_input_files/mt_transpo/Roads.shp") %>%
   st_as_sf() %>%
-  st_simplify()
+  st_simplify() %>% 
+  st_transform(nlcd_proj)
 
-roads_collector <- roads %>%
-  filter(ROADTYPE== "MAJOR COLLECTOR") %>%
-  st_buffer(.,100)
+# roads_collector <- roads %>%
+#   filter(ROADTYPE== "MAJOR COLLECTOR") %>%
+#   st_buffer(.,100)
 
 roads_arterial <- roads %>%
   filter(str_detect(ROADTYPE,"ARTERIAL")) %>%
+  filter(MDT_Syst=="NHS NON-INTERSTATE"|MDT_Syst=="PRIMARY") %>% 
+  group_by(ROADTYPE,SystemClas) %>% 
+  summarise() %>% 
+  ungroup() %>% 
   st_buffer(.,150)
+
+roads_arterial_disag = roads_arterial %>% 
+  as(.,"Spatial") %>% 
+  disaggregate(.) %>% 
+  st_as_sf()
+
+roads_arterial_disag$rd_A <- as.numeric(st_area(roads_arterial_disag))
+roads_arterial_disag$rd_L <- as.numeric(roads_arterial_disag$rd_A/175)
+
+roads_arterial_disag_fltr <- roads_arterial_disag %>% 
+  filter(rd_L > 5000) %>% 
+  select(-rd_L,-rd_A) %>% 
+  group_by(ROADTYPE) %>% 
+  summarise()
+
+roads_arterial_disag_fltr$ROADTYPE <- as.factor(as.character(roads_arterial_disag_fltr$ROADTYPE))
+
+roads_arterial_disag_fltr <- roads_arterial_disag_fltr %>% 
+  mutate(res_value = c(600,800)) %>% 
+  as(.,"Spatial")
+
+# writeOGR(roads_arterial_disag_fltr,
+#          dsn = "../R_output_files/transpo/",
+#          layer = "roads_arterial_disag",
+#          driver = "ESRI Shapefile",
+#          overwrite_layer = T)
 
 roads_nhs <- roads %>%
   filter(str_detect(ROADTYPE,"NHS")) %>%
-  st_buffer(.,200)
+  st_buffer(.,200) %>% 
+  select(ROADTYPE,SystemClas) %>% 
+  mutate(res_value = 1000)
 
-roads_fltr <- rbind(roads_nhs,roads_arterial,roads_collector)
+nhs_ras <- rasterize(x = roads_nhs,y = mt_nlcd, field = 'res_value', fun = "first")
+arterial_ras <- rasterize(x = roads_arterial_disag_fltr, y = mt_nlcd, field = 'res_value', fun='first')
 
-timestamp() # 15:26
-roads_merge <- roads_fltr %>%
-  group_by(ROADTYPE) %>%
-  summarise() %>%
-  as(.,"Spatial")
-timestamp() # 15:30
+road_stack <- stack(nhs_ras,arterial_ras)
+road_ras <- max(road_stack, na.rm = T)
 
-writeOGR(obj = roads_merge,
-         dsn =  "../R_output_files/transpo/",
-         layer = "roads_fltr_shp",
-         driver = "ESRI Shapefile",
-         overwrite=TRUE)
-
-roads_shp <- readOGR("../R_output_files/transpo/roads_fltr_shp.shp") %>%
-  st_as_sf() %>%
-  mutate(res_values = c(500,250,1000,750)) %>%
-  as(.,"Spatial") %>%
-  as(.,"SpatialLinesDataFrame") %>%
-  spTransform(.,crs(nlcd))
-
-# roads_ras_l <- rasterize(roads_shp,y = mt_nlcd,field = 'res_values')
-roads_ras_f <- rasterize(roads_shp,y = mt_nlcd,field = 'res_values',fun='first') ## This works to keep the weird center polygon away
-
-writeRaster(roads_ras_f,"../R_output_files/circuitscape/resistance_variables/roads_res.tif")
+writeRaster(road_ras,"../R_output_files/circuitscape/resistance_variables/roads_res.tif",overwrite=T)
 
 roads_res <- raster("../R_output_files/circuitscape/resistance_variables/roads_res.tif")
+
+# roads_fltr <- rbind(roads_nhs,roads_arterial_disag_fltr)
+# 
+# This method works, but does not result in the maximum resistance value in each location
+#
+#
+# timestamp() # 15:26
+# roads_merge <- roads_fltr %>%
+#   group_by(ROADTYPE) %>%
+#   summarise() %>%
+#   as(.,"Spatial")
+# timestamp() # 15:30
+# 
+# writeOGR(obj = roads_merge,
+#          dsn =  "../R_output_files/transpo/",
+#          layer = "roads_fltr_shp",
+#          driver = "ESRI Shapefile",
+#          overwrite=TRUE)
+# 
+# roads_shp <- readOGR("../R_output_files/transpo/roads_fltr_shp.shp") %>%
+#   st_as_sf() %>%
+#   mutate(res_values = c(500,1000,750)) %>%
+#   as(.,"Spatial") %>%
+#   as(.,"SpatialLinesDataFrame") %>%
+#   spTransform(.,crs(nlcd))
+#
+# roads_ras_l <- rasterize(roads_shp,y = mt_nlcd,field = 'res_values')
+# roads_ras_f <- rasterize(roads_shp,y = mt_nlcd,field = 'res_values',fun='first') ## This works to keep the weird center polygon away
+
+
 ```
 
 ## Wells 
@@ -234,38 +284,39 @@ roads_res <- raster("../R_output_files/circuitscape/resistance_variables/roads_r
 ```
 
 ## Rivers
-```{r}
+```{r rivers}
 
-rivers_sf <- readOGR("../R_input_files/mt_hydrography/NHDArea.shp") %>%
-  st_as_sf()
-
-rivers_fltr <- rivers_sf %>%
-  mutate(avg_width = Shape_Area/Shape_Leng) %>%
-  filter(avg_width > 50 & Shape_Leng > 500) %>%
-  mutate(res_value = 750) %>%
-  as(.,"Spatial") %>%
-  spTransform(.,crs(mt_nlcd))
-
-rivers_ras <- rasterize(rivers_fltr,mt_nlcd,field = "res_value")
-
-writeRaster(rivers_ras, "../R_output_files/circuitscape/resistance_variables/rivers_res.tif")
+# rivers_sf <- readOGR("../R_input_files/mt_hydrography/NHDArea.shp") %>%
+#   st_as_sf()
+# 
+# rivers_fltr <- rivers_sf %>%
+#   mutate(avg_width = Shape_Area/Shape_Leng) %>%
+#   filter(avg_width > 50 & Shape_Leng > 500) %>%
+#   mutate(res_value = 750) %>%
+#   as(.,"Spatial") %>%
+#   spTransform(.,crs(mt_nlcd))
+# 
+# rivers_ras <- rasterize(rivers_fltr,mt_nlcd,field = "res_value")
+# 
+# writeRaster(rivers_ras, "../R_output_files/circuitscape/resistance_variables/rivers_res.tif", overwrite = T)
 
 rivers_res <- raster("../R_output_files/circuitscape/resistance_variables/rivers_res.tif")
 ```
 
 ## NLCD Reclass
 ```{r}
-# 
-# cs_rcl_mat <- c(-Inf,11.5,NA,
-#                      11.5,12.5,100, # Ice and Snow
-#                      19,21,500, # Low development
-#                      24,26,1000, # High Development
-#                      29,31,250, # Barren
-#                      39,41,10, # Forest
-#                      49,51,50, # Shrubland 
-#                      69,71,200, # Grassland
-#                      79,81,800, # Cultivated
-#                      89,91,100) # Wetlands
+
+# cs_rcl_mat <- c(-Inf,10.5,NA,
+#                  10.5,11.5,900,
+#                  11.5,12.5,100, # Ice and Snow
+#                  19,21,500, # Low development
+#                  24,26,1000, # High Development
+#                  29,31,250, # Barren
+#                  39,41,10, # Forest
+#                  49,51,50, # Shrubland
+#                  69,71,200, # Grassland
+#                  79,81,800, # Cultivated
+#                  89,91,100) # Wetlands
 # 
 # nlcd_res <- reclassify(mt_nlcd,cs_rcl_mat)
 # writeRaster(nlcd_res,"../R_output_files/circuitscape/resistance_variables/nlcd_res.tif", overwrite=T)
@@ -276,7 +327,7 @@ nlcd_res <- raster("../R_output_files/circuitscape/resistance_variables/nlcd_res
 
 ## Putting it all together
 
-```{r}
+```{r final_resistance_layers}
 
 # Land cover
 nlcd_res <- raster("../R_output_files/circuitscape/resistance_variables/nlcd_res.tif")
@@ -293,35 +344,40 @@ rivers_res <- raster("../R_output_files/circuitscape/resistance_variables/rivers
 res_stack <- stack(nlcd_res, roads_res, impervious_res, rivers_res)
 max_resistance <- max(res_stack,na.rm = TRUE)
 
-max_res_trans <- raster.transformation(max_resistance,trans = "stretch",smin = 0.1,smax = 1000)
+writeRaster(max_resistance,"../R_output_files/circuitscape/resistance_variables/max.tif",overwrite=T)
 
 # Canopy Cover  
-canopy_res <- raster("../R_output_files/circuitscape/resistance_variables/canopy_cover.tif") 
+canopy_res <- raster("../R_output_files/circuitscape/resistance_variables/canopy_cover.tif")
 max_canopy <- cellStats(x = canopy_res,stat = max)
-canopy_res <- canopy_res/max_canopy
+canopy_res_p <- canopy_res/max_canopy
+canopy_res_stretch = raster.transformation(canopy_res_p,trans = "stretch",smin=0.01,smax=0.98)
 
 # Slope 
 slope_res = raster("../R_output_files/circuitscape/resistance_variables/mt_slope_r.tif")
 max_slope <- cellStats(x = slope_res,stat = max)
-slope_res = slope_res/max_slope
+slope_res_p = slope_res/max_slope
+slope_res_stretch = raster.transformation(slope_res_p,trans = "stretch",smin=0.01,smax=0.98)
 
-max_res_stack_adj <- max_res_trans*(1-slope_res)*(1+canopy_res)
+max_res_adj <- max_resistance*(1-slope_res_stretch+canopy_res_stretch)
 
-resistance_final <- mask(max_res_stack_adj,mt_nlcd)
-NAvalue(resistance_final) <- -9999
+writeRaster(max_res_adj,"../R_output_files/circuitscape/resistance_variables/max_adj.tif",overwrite=T)
+
+resistance_mask <- mask(max_res_adj,mt_nlcd)
+NAvalue(resistance_mask) <- -9999
 
 # Create object to resample NLCD with
-rsmpl_ext <- extent(mt_nlcd)
-rsmpl_res <- 270
-
-rsmpl_ras <- raster()
-extent(rsmpl_ras) <- rsmpl_ext
-res(rsmpl_ras) <- rsmpl_res
-
-resistance_resample = resample(resistance_final, rsmpl_ras)
-NAvalue(resistance_resample) = -9999
+# rsmpl_ext <- extent(mt_nlcd)
+# rsmpl_res <- 270
+# 
+# rsmpl_ras <- raster()
+# extent(rsmpl_ras) <- rsmpl_ext
+# res(rsmpl_ras) <- rsmpl_res
+# 
+# resistance_resample = resample(resistance_final, rsmpl_ras)
+# NAvalue(resistance_resample) = -9999
 
 # writeRaster(max_res_trans,"../R_output_files/circuitscape/resistance/resistance_all.tif",overwrite=T)
-writeRaster(resistance_resample,"../R_output_files/circuitscape/resistance/resistance_FINAL.asc", format = "ascii",overwrite=T)
+
+writeRaster(resistance_mask,"../R_output_files/circuitscape/resistance/resistance_FINAL_2.asc", format = "ascii",overwrite=T)
 ```
 
