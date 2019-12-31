@@ -28,7 +28,7 @@ setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
 ### 2. Load Data
 ```{r load_data}
 
-# Raster: Complete lower 48 NLCD raster data
+# Raster: Lower 48 NLCD raster data
 nlcd <- raster("../R_input_files/nlcd/NLCD_2016_Land_Cover_L48_20190424.img")
 
 # Shapefile: State of Montana outlines
@@ -88,42 +88,49 @@ gb_outline <- as(gb_sf,"Spatial")
 gb_stranded <- as(gb_stranded_sf,"Spatial")
 ```
 
-### 4. Crop NLCD to Montana and to Gallatin-Broadwater
-
-
-### Crop and Resample Montana NLCD Raster
+### 4. Crop NLCD to Montana outline, the resample to desired resolution
 ```{r crop_resample_nlcd}
 # Crop NLCD to Montana Outline (shrink extent)
 nlcd_crop = crop(nlcd,extent(mt_outline))
 
-# Create object to resample NLCD with
-rsmpl_ext <- extent(nlcd_crop)
-rsmpl_res <- 270
+## Create raster object to resample NLCD with
 
+# Set extent equal to cropped NLCD created above
 rsmpl_ras <- raster(nlcd_crop)
+rsmpl_ext <- extent(nlcd_crop)
 extent(rsmpl_ras) <- rsmpl_ext
+
+# Set resolution
+rsmpl_res <- 270
 res(rsmpl_ras) <- rsmpl_res
 
+# Resample NLCD mt to desired resolution
 nlcd_resample = resample(nlcd_crop, rsmpl_ras, method = "ngb")
+
+# Write output raster
 writeRaster(nlcd_resample,"../R_output_files/nlcd/nlcd_resample_90.tif",overwrite=TRUE)
 ```
 
-### Mask resampled nlcd to MT outline
+### 5. Mask resampled nlcd to MT outline
 ```{r nlcd_mt_mask}
+
+# Define core cluster size
 n_cores <- detectCores()-6 
 
-timestamp()
+timestamp() # For reference
 
+# Initiate use of core cluster
 beginCluster(n_cores) 
+# Resample
 nlcd_mt <- clusterR(nlcd_resample, mask, args=list(mt_outline))
+# Stop used of core cluster
 endCluster()
 
-timestamp()
-
+timestamp() # For reference
 ```
 
 
-### Reclassify NLCD Raster
+### 6. Reclassify NLCD Raster
 ```{r nlcd_reclass}
 
 rcl_mat = c(20,22.5,20, # <50% developed: Low intensity
@@ -145,13 +152,13 @@ endCluster()
 timestamp()
 ```
 
-### Clean Stranded Land Geometries
+### 7.  Clean Stranded Land Geometries
 ```{r clean_stranded}
 # Find bad geometrics in 
 mt_stranded_clean = cleangeo::clgeo_Clean(mt_stranded)
 ```
 
-### Crop MT NLCD to just Stranded Land
+### 8. Crop MT NLCD to just Stranded Land
 ```{r crop_mtNLCD_toStranded}
 timestamp() #### 9:33:50
 
@@ -163,7 +170,7 @@ endCluster()
 timestamp() #### 11:33:48
 ```
 
-### Crop MT NLCD to outline of GB Counties
+### 9. Crop MT NLCD to outline of GB Counties
 ```{r crop_mtNLCD_toGB}
 
 beginCluster(n_cores)
@@ -175,7 +182,7 @@ endCluster()
 
 ```
 
-### Crop GB NLCD to just stranded land in GB
+### 10. Crop GB NLCD to just stranded land in GB
 ```{r crop_gbNLCD_toStranded}
 
 beginCluster(n_cores)
@@ -185,7 +192,7 @@ endCluster()
 
 ```
 
-### 5. Plot all to check overlap
+### 11. Plot all to check overlap
 ```{r check_overlap}
 
 # # Montana Overview
@@ -199,7 +206,7 @@ endCluster()
 
 ```
 
-### 6. Write Output Files
+### 12. Write Output Files
 ```{r write_output}
 
 # dir.create("./output/stranded_shp/montana", recursive = T)
