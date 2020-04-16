@@ -1,0 +1,79 @@
+---
+title: "MarxanConnect_InputPrep"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r load_packages}
+
+library(tidyverse)
+library(sf)
+library(rgdal)
+library(raster)
+library(rgeos)
+library(cleangeo)
+library(geospacom)
+
+```
+
+
+
+```{r load_data}
+
+mt_nlcd = raster("../R_output_files/nlcd/nlcd_mt.tif")
+gb_nlcd = raster("../R_output_files/nlcd/nlcd_gb.tif")
+
+PUs = readOGR("../Marxan/R_input_files/mt_PUs/PLSSFirstDivision.shp") %>% 
+  st_as_sf() %>% 
+  st_transform(.,crs(mt_nlcd))
+
+gb_outline = readOGR("../R_input_files/mt_counties/gb_outline.shp") %>% 
+  st_as_sf() %>% 
+  st_transform(.,crs(mt_nlcd))
+
+```
+
+
+Gallatin-Broadwater Planning Units
+```{r crop_PUs_to_GB}
+
+gb_PUs_int = st_intersection(PUs, gb_outline)
+
+gb_PUs = gb_PUs_int %>% 
+  dplyr::select(PLSSID) %>% 
+  dplyr::mutate(Core_ID = as.integer(seq(from = 1, to = nrow(gb_PUs), by = 1))) %>% 
+  as(.,"Spatial") %>% 
+  as(.,"SpatialPolygonsDataFrame")
+
+writeOGR(obj = gb_PUs,
+         dsn = "../Marxan/R_output_files/gb_PUs/",
+         layer = "gb_PUs",
+         driver = "ESRI Shapefile",
+         overwrite_layer = T)
+
+dist_mat = DistanceMatrix(gb_PUs,id = "PU_ID", longlat = F)
+```
+
+
+Polygonize NLCD raster
+```{r}
+
+nlcd_poly <- rasterToPolygons(x = gb_nlcd, dissolve = T) %>% 
+  as(.,"SpatialPolygons")
+
+plot(nlcd_poly)
+
+writeOGR(obj = nlcd_poly,
+         dsn = "../Marxan/R_output_files/nlcd_HabType/",
+         layer = "gb_HabType",
+         driver = "ESRI Shapefile",
+         overwrite_layer = T)
+
+```
+
+

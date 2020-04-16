@@ -79,21 +79,21 @@ pad_disagg <- dplyr::filter(pad_disagg_sf, area > 10000) %>%
 pad_centroids = st_centroid(st_as_sf(pad_disagg)) %>% 
   mutate(ras_value = 1,
          core_id = seq(1:n())) %>%
-  dplyr::select(ras_value) %>% 
+  dplyr::select(core_id) %>% 
   as(.,"Spatial") 
 ```
 
-
-```{r}
+### Write Shapefiles
+```{r write_cores}
 writeOGR(obj = pad_disagg, 
-         dsn =  "../R_output_files/circuitscape/core_areas/pad_shp/",
-         layer = "core_areas_shp",
+         dsn =  "../R_output_files/circuitscape/core_areas/PAD/",
+         layer = "mt_core_area_polys",
          driver = "ESRI Shapefile",
          overwrite = T)
 
 writeOGR(obj = pad_centroids, 
-         dsn =  "../R_output_files/circuitscape/core_areas/pad_shp/",
-         layer = "pad_centroids",
+         dsn =  "../R_output_files/circuitscape/core_areas/PAD/",
+         layer = "mt_core_area_pts",
          driver = "ESRI Shapefile",
          overwrite=T)
 ```
@@ -101,20 +101,14 @@ writeOGR(obj = pad_centroids,
 ### Rasterize centroids
 ```{r}
 
-center_ras = rasterize(pad_centroids, nlcd_mt, field = 1,background = NA)
-NAvalue(center_ras) <- -9999
-writeRaster(center_ras,"../R_output_files/circuitscape/center.asc",format = "ascii",overwrite=TRUE)
+core_node_ras = rasterize(pad_centroids, nlcd_mt, field = 'core_id', background = NA)
 
-```
+# Look at raster values to make sure the core nodes go from 1:46
+core_node_df = as.data.frame(core_node_ras)
 
-cropping to GB
-```{r}
+NAvalue(core_node_ras) <- -9999
 
-## Item to crop: 
-center_ras_gbCrop <- crop(center_ras,extent(gb_outline))
-center_ras_gb <- mask(center_ras_gbCrop,gb_outline)
+writeRaster(core_node_ras,"../R_output_files/circuitscape/core_nodes",format = "ascii",overwrite=TRUE)
 
-plot(center_ras_gb$ras_value)
-writeRaster(center_ras_gb$ras_value,"../R_output_files/circuitscape/center_gb.asc",format = "ascii",overwrite=TRUE)
 ```
 

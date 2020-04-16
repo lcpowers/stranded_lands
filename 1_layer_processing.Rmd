@@ -28,10 +28,10 @@ setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
 ### 2. Load Data
 ```{r load_data}
 
-# Raster: Lower 48 NLCD raster data
+# NLCD: Lower 48 NLCD raster data (2016)
 nlcd <- raster("../R_input_files/nlcd/NLCD_2016_Land_Cover_L48_20190424.img")
 
-# Shapefile: State of Montana outlines
+# Shapefile: State of Montana outline
 mt_outline <- readOGR("../R_input_files/mt_outline/StateofMontana.shp") %>% 
   # Put into NLCD CRS so the layers overlap 
   spTransform(.,crs(nlcd)) 

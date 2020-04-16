@@ -110,14 +110,14 @@ mt_slope <- raster("../R_output_files/DEM/mt_slope_r.tif")
 ## Canopy cover
 ```{r canopy_cover}
 
-## This reads in with min/max values from 0 to 255, not 0 - 100 like the NLCD legend says
+## This reads in with min/max values from 0 to 255, not 0 - 100 like the NLCD legend indicates
 canopy <- raster("../R_input_files/nlcd_treecanopy/nlcd_2016_treecanopy_2019_08_31.img")
-canopy_max <- cellStats(x = canopy,stat = 'max')
-canopy_prop <- canopy/canopy_max
 
 canopy_crop <- crop(canopy,extent(mt_nlcd))
 canopy_rsmpl <- resample(canopy_crop,mt_nlcd)
-canopy_mask <- mask(canopy_rsmpl,mt_nlcd)
+canopy_mask <- round(mask(canopy_rsmpl,mt_nlcd),0)
+canopy_mask[canopy_mask>100] <- 50
+freq(canopy_mask)
 
 writeRaster(canopy_mask,"../R_output_files/circuitscape/resistance_variables/canopy_cover.tif",overwrite=TRUE)
 
@@ -350,13 +350,10 @@ writeRaster(max_resistance,"../R_output_files/circuitscape/resistance_variables/
 canopy_res <- raster("../R_output_files/circuitscape/resistance_variables/canopy_cover.tif")
 max_canopy <- cellStats(x = canopy_res,stat = max)
 canopy_res_p <- canopy_res/max_canopy
-canopy_res_stretch = raster.transformation(canopy_res_p,trans = "stretch",smin=0.01,smax=0.98)
 
 # Slope 
 slope_res = raster("../R_output_files/circuitscape/resistance_variables/mt_slope_r.tif")
-max_slope <- cellStats(x = slope_res,stat = max)
-slope_res_p = slope_res/max_slope
-slope_res_stretch = raster.transformation(slope_res_p,trans = "stretch",smin=0.01,smax=0.98)
+slope_res_p = slope_res/90
 
 max_res_adj <- max_resistance*(1-slope_res_stretch+canopy_res_stretch)
 
@@ -378,6 +375,6 @@ NAvalue(resistance_mask) <- -9999
 
 # writeRaster(max_res_trans,"../R_output_files/circuitscape/resistance/resistance_all.tif",overwrite=T)
 
-writeRaster(resistance_mask,"../R_output_files/circuitscape/resistance/resistance_FINAL_2.asc", format = "ascii",overwrite=T)
+writeRaster(resistance_mask,"../R_output_files/circuitscape/resistance/resistance_final.asc", format = "ascii",overwrite=T)
 ```
 

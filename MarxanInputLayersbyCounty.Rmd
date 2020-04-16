@@ -1,0 +1,142 @@
+---
+title: "Marxan Input Layers by County"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1) Load Packages
+```{r packages, message=FALSE, warning=FALSE}
+setwd("~/Desktop/StrandedLand/stranded_repo")
+
+library(tidyverse) # General data wranfling
+library(rgdal) # Shapefiles
+library(raster) # Spatial data
+library(sf) # Shapefiles/simple features
+library(cleangeo) # Fixes bad polygons
+library(parallel) # For parallel processing
+
+```
+
+This Rmarkdown document completes the development of Marxan Input layers, in the following steps:
+
+## 1) Conservation Feature File
+
+
+### NLCD data and county shapefile
+```{r data}
+# Reading in original NLCD data here. When I ran circuitscape to look at connectivity across Montana, I resampled the NLCD raster to be at a 270m resolution. I found that when I kept that resolution for Marxan layers, that resulted in large areas around the border of the counties being cropped out. Using the original NLCD data at a 30m resolution reduces those areas
+
+nlcd = raster("../R_input_files/nlcd/NLCD_2016_Land_Cover_L48_20190424.img")
+
+mt_counties = readOGR("../R_input_files/mt_counties/County.shp") %>% 
+  spTransform(.,crs(nlcd)) %>% # Put into NLCD CRS
+  st_as_sf() %>% # Turn into simple features DF
+  dplyr::select(NAME) # Get rid of extra fields in the attribute table
+
+nlcd_crop = crop(nlcd,extent(as(mt_counties,"Spatial")))
+nlcd_mt = mask(nlcd_crop,as(mt_counties,"Spatial"))
+
+rcl_mat = c(-Inf,0,NA, 
+            20,29,20, # Urban
+            30,32,30, # Barren
+            40,44,40, # Forest
+            50,53,50, # Shrubland
+            70,74,70, # Grassland
+            80,83,80, # Cultivated
+            89,96,90) # Wetlands
+
+# Reclassify Montana NLCD raster
+timestamp()
+
+# Reclassify NLCD raster. Parallel processing for speed
+beginCluster(detectCores()-6)
+nlcd_mt_rcl <- clusterR(nlcd_mt, reclassify,args = list(rcl_mat,include.lowest=TRUE))
+endCluster()
+
+timestamp()
+
+```
+
+## 2) Conservation Feature File (spec.dat in Marxan)
+```{r conservation_features}
+
+## Create a table with the species penalty factor and NLCD class name, to be joined to zonal stats data at in the following for loop
+nlcd_name_table = data.frame(id = c(11, 12, 20, 30, 40, 50, 70, 80, 90),
+                             spf = c(1, 10,  1, 10, 50, 50,  1, 10, 50),
+                             name =  c("water", "snow", "urban", "barren", "forest", "scrub", "grassland", "ag", "wetland"))
+
+## Create vector of the names of all counties in Montana
+county_names = as.vector(mt_counties$NAME)
+
+## Initialize an empty list. This is where the output for each county will be placed in the following for loop 
+NLCDbyCounty_list = vector(mode = "list",
+                           length = length(mt_counties$NAME))
+
+## Set the names of each element in the list created above for easier reference
+names(NLCDbyCounty_list) = county_names
+
+timestamp()
+for(i in 1:length(county_names)){
+  
+  # County name variable
+  county_name = county_names[i]
+  
+  # Print current county name to show progress
+  print(county_name)
+  
+  # Filter full montana county shapefile to the current(i) county
+  tmp_county = mt_counties %>% 
+    filter(NAME == county_name) %>% 
+    as(.,"Spatial")
+  
+  county_buffer = gBuffer(tmp_county,width=30,byid = T)
+  
+  # Crop nlcd raster to current county extent
+  nlcd_crop = raster::crop(nlcd_mt_rcl,extent(county_buffer))
+  
+  # Mask nlcd to current county outline
+  nlcd_mask = raster::mask(nlcd_crop,county_buffer)
+  
+  # Determine the frequency of each nlcd class in each county
+  nlcd_freq = as.data.frame(freq(nlcd_mask, na.rm = T))
+  
+  colnames(nlcd_freq) = c("id","target")
+  
+  # Get rid of NA row
+  nlcd_freq = nlcd_freq %>% 
+    filter(!is.na(id))
+  
+  # Merge the zonal stats table with the spf/name table created before the loop
+  nlcd_freq = merge(nlcd_freq,nlcd_name_table)
+  
+  #### Use the following if proportions matter
+  # Count total number of cells with NLCD values
+  # total_cells = sum(nlcd_freq$count)
+  
+  # Find the proportion contained in each class
+  # nlcd_freq$prop = round(nlcd_freq$count/total_cells,4)
+  
+  # Add the frequency table as an element to the County_NLCDfreq_list
+  NLCDbyCounty_list[[i]] = nlcd_freq
+  
+}
+
+## Write output conservation feature files 
+for(i in 1:length(NLCDbyCounty_list)){
+  
+  ## Get correct element from output list
+  spec <- NLCDbyCounty_list[[i]]
+  
+  ## Get county name
+  county = names(NLCDbyCounty_list[i])
+  
+  ## Write output
+  write_delim(spec, path = paste0("../Marxan/R_output_files/MarxanInput_byCounty/",county,"/spec.dat"), delim =" ")
+  
+}
+
+```
+

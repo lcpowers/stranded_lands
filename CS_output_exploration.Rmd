@@ -1,0 +1,48 @@
+---
+title: "boundary_data"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(rgdal)
+library(sf)
+
+boundary_data = read.delim("../Marxan/R_output_files/MarxanInput_byCounty/CUSTER/boundary.dat"," ",header=T)
+
+pus = unique(boundary_data$id2)
+
+missing_pairs = data.frame(pu_id=rep(NA,3778),
+                           freq = rep(NA,3778))
+
+for(i in 1:length(pus)){
+
+fltr = boundary_data %>% 
+  filter(id1 == pus[i]|id2 == pus[i])
+
+number = nrow(fltr)
+
+missing_pairs[i,1] = pus[i]
+missing_pairs[i,2] = number
+print(i)
+      }
+
+
+sections = readOGR("../Marxan/R_output_files/PUs/sections_wPUid.shp") %>% 
+  st_as_sf() %>% 
+  filter(pu_id %in% pus)
+  
+sections_freq_merge = merge(sections,missing_pairs)
+
+writeOGR(as(sections_freq_merge,"Spatial"),
+         "../R_output_files/scratch/",
+         "pairwise_sections_incomplete",
+         "ESRI Shapefile")
+
+# This frequency visualized seems really random. 
+``` 
+

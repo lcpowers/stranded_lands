@@ -1,0 +1,353 @@
+---
+title: "MarxanInput_PlanningUnits"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1) Load Packages
+```{r load_packages}
+library(tidyverse)
+library(raster)
+library(rgdal)
+library(sf)
+library(cleangeo)
+library(parallel)
+library(multiplex)
+
+str = readOGR("../R_output_files/stranded_shp/montana/mt_stranded.shp")%>% 
+  spTransform(.,crs(nlcd))
+
+str_sf = st_as_sf(str)
+
+# counties = readOGR("../R_input_files/mt_counties/County.shp") %>% 
+#   spTransform(.,crs(nlcd))
+# 
+# county_sf = st_as_sf(counties) %>% 
+#   dplyr::select(NAME)
+
+# Read in sections
+sections = readOGR("../R_input_files/PLSS/sections_clean.shp") %>% 
+  spTransform(.,crs(nlcd))
+
+# Add simple section(pu) ID column. Could use the unique IDs already there, but they're long. These will be simpler to reference
+sections$pu_id = seq(1:length(sections$FRSTDIVID))
+
+writeOGR(obj = sections,
+         dsn = "../Marxan/R_output_files/PUs/",
+         layer = "sections_wPUid",
+         driver = "ESRI Shapefile")
+
+```
+
+## 2) Load and prepare NLCD data. 
+- Using the original 30-m resolution NLCD data because when cropped it can match much more closely to each county's outline
+```{r nlcd_data}
+
+## Load original NLCD data
+nlcd = raster("../R_input_files/nlcd/NLCD_2016_Land_Cover_L48_20190424.img")
+
+## Load montana outline to crop NLCD 
+mt_outline = readOGR("../R_input_files/mt_outline/StateofMontana.shp") %>% 
+  spTransform(.,crs(nlcd))
+
+## Crop nlcd to mt outline extent. This speed up the mask by quite a lot
+nlcd_mt_crop = crop(nlcd,extent(mt_outline))
+
+### Prepare for parallel processing 
+# Define core cluster size
+n_cores <- detectCores()-6 
+
+timestamp() # For reference
+
+# Initiate use of core cluster
+beginCluster(n_cores) 
+# Mask nlcd data to outline of Montana
+nlcd_mt <- clusterR(nlcd_mt_crop, mask, args=list(mt_outline))
+# Stop used of core cluster
+endCluster()
+
+timestamp() # For reference
+
+# Reclassification matrix for nlcd data to simplify the classes. Could easily skip the following few steps if it seemed important to maintain the original classes. Would need to switch all places where nlcd_mt_rcl is called to nlcd_mt
+rcl_mat = c(-Inf,0,NA, 
+            20,22.5,20, # <50% developed: Low intensity
+            22.5,24,25, # 50 - 100% developed: High intensity
+            30,32,30, # Barren
+            40,44,40, # Forest
+            50,53,50, # Shrubland
+            70,74,70, # Grassland
+            80,83,80, # Cultivated
+            89,96,90) # Wetlands
+
+# Reclassify Montana NLCD raster
+timestamp()
+
+# Reclassify NLCD raster. Parallel processing for speed
+beginCluster(n_cores)
+nlcd_mt_rcl <- clusterR(nlcd_mt, reclassify,args = list(rcl_mat,include.lowest=TRUE))
+endCluster()
+
+timestamp()
+```
+
+
+## 3) Creating the Conservation Feature file for each county (spec.dat in Marxan)
+```{r getNLCDfreq_byCounty}
+
+## Create a table with the species penalty factor and NLCD class name, to be joined to zonal stats data at in the following for loop
+
+nlcd_name_table = data.frame(id = c(11,12,20,25,30,40,50,70,80,90),
+                             spf = c(1,10, 1, 1,10,50,50,1,10,50),
+                             name =  c("water","snow","low_dev","high_dev","barren","forest","scrub","grassland","ag","wetland"))
+
+## Initialize an empty list. This is where the output for each county will be placed in the following for loop 
+NLCDbyCounty_list = vector(mode = "list",length = length(counties$NAME))
+
+## Create vector of the names of all counties in Montana
+county_names = as.vector(counties$NAME)
+
+## Define the names of each element in the list created above for easier reference
+names(NLCDbyCounty_list) = county_names
+
+timestamp()
+for(i in 1:length(county_names)){
+  
+  # County name i
+  county_name = county_names[i]
+  
+  # Print current county name to show progress
+  print(county_name)
+  
+  # Filter full montana county shapefile to the current(i) county
+  tmp_county = county_sf %>% 
+    filter(NAME == county_name) %>% 
+    as(.,"Spatial")
+  
+  # crop nlcd raster to current county extent
+  nlcd_crop = raster::crop(nlcd_mt_rcl,extent(tmp_county))
+  
+  # Mask nlcd to current county outline
+  nlcd_mask = raster::mask(nlcd_crop,tmp_county)
+  
+  # Determine the frequency of each nlcd class in each county
+  nlcd_freq = as.data.frame(freq(nlcd_mask, na.rm = T))
+  
+  # Define column names
+  colnames(nlcd_freq) = c("id","target")
+  
+  # Get rid of NA row
+  nlcd_freq = nlcd_freq %>% 
+    filter(!is.na(id))
+  
+  # Merge the nlcd_freq table with the spf/name table created before the loop
+  nlcd_freq = merge(nlcd_freq,nlcd_name_table)
+  
+  #### Use the following if proportions matter
+  # Count total number of cells with NLCD values
+  # total_cells = sum(nlcd_freq$count)
+  
+  # Find the proportion contained in each class
+  # nlcd_freq$prop = round(nlcd_freq$count/total_cells,4)
+  
+  # Add the frequency table as an element to the County_NLCDfreq_list
+  NLCDbyCounty_list[[i]] = nlcd_freq
+  
+}
+
+## Write output conservation feature files 
+for(i in 1:length(NLCDbyCounty_list)){
+  
+  ## Get correct element from output list
+  spec <- NLCDbyCounty_list[[i]]
+  
+  ## Get county name
+  county = names(NLCDbyCounty_list[i])
+  
+  ## Write output
+  write_delim(spec, path = paste0("../Marxan/R_output_files/MarxanInput_byCounty/",county,"/spec.dat"), delim =" ")
+  
+}
+
+```
+
+## 4) Creating the Planning Unit File (pu.dat in Marxan)
+```{r planning_unit}
+# Looking at duplicate section IDs. There are a total of 50 -- 25 pairs that share the same section ID. These have some special designation...need to make a note of exactly what that is. 
+sectionID_duplicates = as.data.frame(table(as.character(sections$FRSTDIVID))) %>% 
+  filter(Freq>1)
+
+# Get rid of unnecessary columns
+sections_fltr = st_as_sf(sections) %>% 
+  dplyr::select(section_id = FRSTDIVID,pu_id)
+
+##### This will then need to be joined to the cadastral data -- maybe by firstdivid?
+```
+
+## 5) Creating the Conservation Feature vs PU file 
+```{r CFvsPU, message=FALSE, warning=FALSE}
+
+NLCDbySection_list = vector(mode = "list",length = length(counties$NAME))
+names(NLCDbySection_list) = county_names
+
+timestamp()
+
+for(i in county_names){
+ 
+  # County name variable
+  county_name = i
+  
+  # Print current county name to show progress
+  print(county_name)
+  
+  # filter full montana county shapefile for just the current county
+  county_i_filter = county_sf %>% 
+    filter(NAME == county_name) %>% 
+    as(.,"Spatial")
+  
+  ## NLCD county i crop ##
+  nlcd_county_crop = crop(nlcd_mt_rcl,county_i_filter)
+
+  ## NLCD county i mask ##
+  nlcd_county_mask = mask(nlcd_county_crop, county_i_filter)
+  
+  ## Crop section data to current county
+  county_i_sections = intersect(as(sections_fltr,"Spatial"),county_i_filter)
+  
+  section_areas = area(county_i_sections)
+
+  ##
+  county_i_sections = st_as_sf(county_i_sections) %>%
+    mutate(section_area = section_areas) %>%
+    filter(section_area > 30)
+  
+  ### Get section ID list
+  section_ids = as.vector(county_i_sections$pu_id)
+  
+  # Initialze data.frame for current county. The count of NLCD classes in each section within county 'i' will be placed in this data.frame.
+  output_df = data.frame(value = double(),
+                   count = double(),
+                   prop = double(),
+                   pu_id = character())
+  
+  ## For loop for to get NLCD class frequency for each section within the current county ####
+  
+  for(j in section_ids){
+    
+    # print(j)
+    
+    # Select section
+    section_i = county_i_sections %>% 
+      filter(pu_id == j) %>% 
+      as(.,"Spatial")
+    
+    # crop nlcd raster to current county extent
+    nlcd_section_crop = raster::crop(nlcd_county_mask,section_i)
+
+    # Mask nlcd to current county outline
+    nlcd_section_mask = raster::mask(nlcd_section_crop,section_i)
+    
+    # Determine the frequency of each nlcd class in section j of county i
+    nlcdFreq_sections = as.data.frame(freq(nlcd_section_mask, na.rm = T))
+  
+    # Get rid of NA row
+    nlcdFreq_sections = nlcdFreq_sections %>% 
+      filter(!is.na(value))
+  
+    # Count total number of cells with NLCD values
+    total_cells = sum(nlcdFreq_sections$count)
+  
+    # Find the proportion contained in each class
+    nlcdFreq_sections$prop = round(nlcdFreq_sections$count/total_cells,4)
+    
+    # Add in PU(section) id column
+    nlcdFreq_sections$pu_id = rep(x = as.character(j),
+                                  times = nrow(nlcdFreq_sections))
+  
+    # Add in county name column
+    nlcdFreq_sections$county = rep(x = as.character(i),
+                                  times = nrow(nlcdFreq_sections))
+    
+    # Progressively build output data.frame
+    output_df = rbind(output_df,nlcdFreq_sections)
+    
+  }
+  
+    # Add the frequency table as an element to the County_NLCDfreq_list
+    NLCDbySection_list[[i]] = output_df
+  
+}
+
+timestamp()
+## Start time -- 23:14:30 ##
+## Finish time -- 1:12:04* ##
+
+dir.create("../Marxan/R_output_files/PUvsCONF")
+
+## Write output pu vs conservation feature files 
+for(i in 1:length(NLCDbySection_list)){
+  
+  tmp <- NLCDbySection_list[[i]]
+  puvspr2 = tmp %>% 
+    dplyr::select(value,pu_id,count)
+  
+  colnames(puvspr2) <- c("species","pu","amount")
+  
+  county = names(NLCDbySection_list[i])
+  
+  write_delim(puvspr2, path = paste0("../Marxan/R_output_files/MarxanInput_byCounty/",county,"/puvspr2.dat"))
+  
+}
+
+```
+
+## Checking results of above for-loop. Section duplicates on the county borders
+```{r checking_duplicated_sections}
+
+check_dups_df <- data.frame(unique(NLCDbySection_list[[1]]))
+
+for(i in 2:56){
+  
+  unique_pu_id =data.frame(unique(NLCDbySection_list[[i]]))
+  
+  check_dups_df = rbind(check_dups_df,unique_pu_id)
+  
+}
+
+puId_table = data.frame(table(check_dups_df$pu_id)) %>% 
+  filter(Freq>9)
+
+duplicated_PUs = as.character(puId_table$Var1)
+
+duplicate_summary = check_dups_df %>% 
+  group_by(county,pu_id) %>% 
+  summarise(sum(count)) %>% 
+  ungroup() %>% 
+  filter(as.character(pu_id) %in% duplicated_PUs)
+
+duplicate_sections_shp = sections_fltr %>% 
+  filter(as.character(pu_id) %in% duplicated_PUs) %>% 
+  as(.,"Spatial")
+
+writeOGR(duplicate_sections_shp,
+         dsn = "../R_output_files/scratch/",
+         layer = "duplicatesections",
+         driver = "ESRI Shapefile",
+         overwrite_layer = T)
+
+## Clear that sections on a county border are counted twice ##
+```
+
+```{r}
+summed_solution = read_delim("../blm_1500_ssoln.txt",",")
+custer_pus_ssol = merge(y=summed_solution, x=custer_pus, by.y = "planning unit", by.x = "pu_id")
+writeOGR(as(custer_pus_ssol,"Spatial"),
+         "../R_output_files/scratch/",
+         "summed_solution",
+         "ESRI Shapefile")
+```
+
+
+

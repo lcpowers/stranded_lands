@@ -29,7 +29,7 @@ stranded_gb <- raster("../R_output_files/nlcd/nlcd_gb_stranded.tif")
 nlcd_gb <- raster("../R_output_files/nlcd/nlcd_gb.tif")
 
 # Resistance raster
-res_ras <- raster("../R_output_files/circuitscape/resistance/resistance_FINAL_2.asc")
+res_ras <- raster("../R_output_files/circuitscape/resistance/resistance_final.asc")
 ```
 
 ### 2. Prepare resistance raster to have stranded land cell value changed uniformly
@@ -74,10 +74,10 @@ stranded_lowRes <- stranded_nlcd
 stranded_lowRes[stranded_lowRes==-1]<-lowRes
 
 dir.create("../R_output_files/circuitscape/gb_resistance")
-writeRaster(res_ras_gb,"../R_output_files/circuitscape/gb_resistance/gb_res_null.asc",format='ascii')
-writeRaster(stranded_highRes,"../R_output_files/circuitscape/gb_resistance/gb_res_strandedHigh.asc",format = 'ascii')
-writeRaster(stranded_modRes,"../R_output_files/circuitscape/gb_resistance/gb_res_strandedMod.asc",format = 'ascii')
-writeRaster(stranded_lowRes,"../R_output_files/circuitscape/gb_resistance/gb_strandedLow.asc", format = 'ascii')
+writeRaster(res_ras_gb,"../R_output_files/circuitscape/gb_resistance/gb_res_null.asc",format='ascii', overwrite = T)
+writeRaster(stranded_highRes,"../R_output_files/circuitscape/gb_resistance/gb_res_strandedHigh.asc",format = 'ascii', overwrite = T)
+writeRaster(stranded_modRes,"../R_output_files/circuitscape/gb_resistance/gb_res_strandedMod.asc",format = 'ascii', overwrite = T)
+writeRaster(stranded_lowRes,"../R_output_files/circuitscape/gb_resistance/gb_strandedLow.asc", format = 'ascii', overwrite = T)
 ```
 
 Adjusting Stranded Land values based on surrounding landscape
