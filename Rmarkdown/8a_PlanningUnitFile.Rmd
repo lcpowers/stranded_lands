@@ -1,0 +1,286 @@
+---
+title: "PlanningUnitFile"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Packages and settings
+```{r packagesanddata}
+
+library(rgdal)
+library(raster)
+library(cleangeo)
+library(tidyverse)
+library(sf)
+library(parallel)
+
+options(scipen = 0)
+```
+
+## Data 
+```{r}
+# NLCD
+nlcd <- raster("../R_output_files/nlcd/mt_nlcd_270.tif")
+
+# Mt counties, to eventually loop through each county
+counties <- readOGR("../R_input_files/mt_counties/County.shp") %>% 
+  spTransform(.,crs(nlcd)) %>% 
+  st_as_sf() %>% 
+  dplyr::select(NAME)
+
+## Public Land: Stranded and Accessible ####
+mt_public_land <- read_sf("../R_input_files/stranded_shp/mt_strandedMaster_clean.shp") %>% 
+  st_transform(.,crs(nlcd)) 
+
+## Change to upper case to match with county attribute table
+mt_public_land$name <- toupper(mt_public_land$name)
+
+## Filter public land for stranded land parcels (strandedal == more stranded parcels: 10890, stranded == 7637)
+mt_public_stranded = mt_public_land %>% 
+  filter(stranded == 1)
+
+## 
+# mt_public_accessible = mt_public_land %>% 
+#   filter(strandedal != 1)
+
+## Does it make sense to have non-stranded public land from this file locked into the reserve system? If there is a lot of grazing happening on the land, does it make more sense to center around the core areas that are actually wildlife habitat?
+
+## Grazing Allotments
+# mt_grazing = read_sf("../R_input_files/mt_pad/PAD_combined_clean.shp") %>% 
+#   st_transform(.,crs(nlcd)) %>% 
+#   filter(str_detect(Loc_Ds,"Grazing")) %>% 
+#   dplyr::select(geometry)
+
+```
+
+
+## Loop settings
+```{r loop_settings}
+
+# If want to loop through all counties, uncomment the following line
+county_names = as.vector(counties$NAME)
+
+# county_names = "CUSTER"
+```
+
+# Planning Units (pu.dat)
+**Columns include:**
+
++ id
++ cost
++ status
+
+### Finding the cost (total value) of each planning unit (section)
+```{r PU_cost}
+
+# Initialize list where the output of the following loop will be stored
+PUbyCounty_list = vector(mode = "list",length = length(county_names))
+
+# For time estimates
+timestamp()
+
+for(i in 1:length(county_names)){
+  
+  # County name for current loop
+  county_name = county_names[[i]]
+  print(c(i,county_name))
+  
+  # Read in county i sections
+  county_i_sections = read_sf(paste0("../R_output_files/PLSS_sections/",county_name,"/pu_",county_name,".shp")) 
+  
+  # County i cadastral
+  county_i_cadastral = read_sf(paste0("../R_output_files/cadastral_sectionAdjust/",county_name,"/",county_name,"_cadSectionAdj.shp")) %>% 
+    dplyr::select(OBJECTID, "TotalValue" = Final_TV)
+  
+  # Join Cadastral data to Custer Sections
+  cad_section_join = st_join(x = county_i_cadastral, y = county_i_sections, largest = T)
+  
+  ## Collapsing on sections to find the total value of each section by summing the "TotalValue" of all parcels in each section
+  SectionValue_sf = cad_section_join %>% # Get the spatial dataframe (attribute table) from cadastral-section join above
+    as.data.frame() %>% # Turn into a dataframe to get rid of the geometry column -- this speeds things up considerably
+    dplyr::select(-geometry) %>% 
+    group_by(pu_id) %>% # Group the following operation by Planning Unit IDs
+    summarise(section_value = sum(as.numeric(TotalValue),na.rm=T)) # Sum that total value column (originally from cadastral data) for each PU
+
+  ## Merge the total section value column from the collapsed/summarized dataframe into the section spatial data.frame
+  PU_value_sf = merge(county_i_sections,SectionValue_sf) %>% # Perform merge
+    dplyr::select(id = pu_id, cost = section_value) %>% # select columns pu_id (now id) and section_value (now cost) -- renamed to match Marxan input requirements
+    mutate(status.neutral = 0) ## Create a baseline status == 0, which is the neutral value in marxan reserve design
+  
+  PU_value_sf$cost = PU_value_sf$cost/10000
+  
+  PUbyCounty_list[[i]] = PU_value_sf
+  
+}
+
+timestamp()
+```
+
+### PU Status
+```{r PU_status}
+
+# # Reclassify NLCD
+# beginCluster(detectCores()-4)
+# nlcd_urban = clusterR(x = nlcd,
+#                       fun = reclassify,
+#                       args = list(rcl=c(-Inf,19,NA,
+#                                         19,29,20,
+#                                         29,100,NA)))
+# endCluster()
+# 
+# # Write output to check
+# writeRaster(nlcd_urban,"../R_output_files/nlcd/nlcd_urbanLockedOut_270.tif",overwrite = T)
+# 
+# # Convert NLCD urban raster to polygons
+# nlcd_urban_shp = rasterToPolygons(x = nlcd_urban,na.rm = T,dissolve = T) %>%
+#   spTransform(.,crs(nlcd)) %>%
+#   st_as_sf()
+# 
+# # Write output to check
+# writeOGR(obj = as(nlcd_urban_shp,"Spatial"),
+#          dsn = "../R_output_files/nlcd/",
+#          layer = "nlcd_urban_270",
+#          driver = "ESRI Shapefile",
+#          overwrite_layer = T)
+# 
+nlcd_urban_shp <- read_sf("../R_output_files/nlcd/nlcd_urban_270.shp") %>%
+  st_buffer(.,200)
+# 
+# # Read in roads file 
+# mt_roads = raster("../R_output_files/transpo/roads_raster.tif")
+# 
+# mt_roads_shp = rasterToPolygons(x = mt_roads,na.rm = T, dissolve = T) %>% 
+#   spTransform(.,crs(nlcd))
+
+major_roads = read_sf("../R_output_files/transpo/major_roads_270_polys.shp")
+
+corridor50k_pus = read.table("../../CS_LM_output/CS/05062020_50k_resistances_3columns.dat")
+
+corridor50k_pus = as.numeric(unique(corridor50k_pus$V1))
+
+# Create a cost threshold table
+cost_thresholds = data.frame(county_name = county_names,
+                             cost_thresholds = rep(NA,length(county_names)))
+
+# Decide status of stranded parcels: 0 for neutral, 1 for in initial reserve but maybe not final, 2 = locked in, 3 = locked out
+# 1 is probably closest to reality and 3 will force land swaps
+
+stranded_status = 1 # Initial but not necessarily final reserve
+
+for(i in 1:length(county_names)){
+
+  # County name for current loop
+  county_name = county_names[[i]]
+  print(c(i,county_name))
+  
+  # Filter the Montana Counties shapefile for county i
+  county_i = counties %>%
+    filter(NAME == county_name)
+  
+  #### Stranded Land Parcels
+  stranded = mt_public_stranded %>% 
+    dplyr::filter(name == county_name) %>% 
+    dplyr::select() %>% 
+    mutate(status.stranded = stranded_status) %>% # Stranded status defined about; either 1 or 0
+    st_buffer(.,-50) # Prevents stranded parcels from joining with adjacent sections/PUs 
+  
+  #### Status = 2. Locked into reserve system -- core areas used in circuitscape analysis
+  core_areas = read_sf("../R_output_files/circuitscape/core_area_shapefiles/",county_name,"/",county_name,"_coreareas_final.shp") %>% 
+    dplyr::select() %>% 
+    mutate(status.core = 2)
+  
+  #### Status = 3. Locked out of reserve
+  # county_i_grazing = st_intersection(mt_grazing,county_i) %>% 
+  #   select(geometry)
+  
+  county_i_urban = st_intersection(nlcd_urban_shp,county_i) %>% 
+    dplyr::select(geometry)
+  
+  ## Read in roads shapefile developed for the CS resistance layer
+  county_i_roads = st_intersection(major_roads,county_i) %>% 
+    dplyr::select(geometry)
+  
+  ## Merge roads and urban shapefiles into one shapefile
+  locked_out = rbind(x = county_i_roads,y = county_i_urban)
+  
+  ### Bind roads/urban to locked out public land
+  # locked_out = rbind(locked_out,locked_out_publicLand)
+  rownames(locked_out) <- NULL
+  locked_out$status.urban = 3
+  
+  ## Get PU_value_sf from list created in previous for loop
+  PU_value_sf = PUbyCounty_list[[i]]
+  
+  ### Join table with pu_id and value to initial reserve status
+  
+  PU_value_sf_status1 = st_join(PU_value_sf,
+                               stranded,
+                               largest = T)
+  
+  PU_value_sf_status2 = st_join(PU_value_sf_status1,
+                               core_areas,
+                               largest=T)
+  
+  ## Join PU_value_sf with status 0 and 1 to locked out
+  PU_value_sf_status3 = st_join(PU_value_sf_status2,
+                               locked_out,
+                               largest = T)
+  
+  # Simplify DF name
+  PU = PU_value_sf_status3
+  
+  # Combine PU status column
+  PU$status = ifelse(!is.na(PU$status.urban),3, 
+                     ifelse(!is.na(PU$status.core),2,
+                            ifelse(!is.na(PU$status.stranded),1,PU$status.neutral)))
+  
+  dir.create(paste0("../R_output_files/marxan_finalPU_shp"))
+  
+  # Write output shapefile
+  writeOGR(obj = as(PU,"Spatial"),
+           dsn = paste0("../R_output_files/marxan_finalPU_shp/",county_names[i],"/"),
+           layer = paste0(county_names[i],"_finalPU_standard"),
+           "ESRI Shapefile",
+           overwrite = T)
+  
+  # Creating .dat file
+  final_pu = PU %>% 
+    as.data.frame() %>% 
+    dplyr::select(id,cost,status)
+  
+  # Find the cost threshold for Marxan, based on the cost of sections with stranded land in them
+  cost_thresholds[i,2] = sum(final_pu$cost[final_pu$status == 1])
+  
+  write_delim(final_pu,paste0("../R_output_files/MarxanInput_byCounty/",county_name[i],"/pu.dat"),delim = " ")
+  
+  #### Creating PU file with planning units outside of Corridor locked out
+  # 
+  # PU_corr = PU # Create data.frame identical to standard PU data.frame
+  # PU_corr$status = ifelse(!(PU$id %in% corridor50k_pus), 3, PU$status)
+  # 
+  # # Look at difference in status counts
+  # table(PU$status)
+  # table(PU_corr$status)
+  # 
+  # writeOGR(obj = as(PU_corr,"Spatial"),
+  #          dsn = paste0("../R_output_files/marxan_finalPU_shp/",county_names[i],"/"),
+  #          layer = paste0(county_names[i],"_finalPU_nonCirrLockout"),
+  #          "ESRI Shapefile",
+  #          overwrite = T)
+  # 
+  # # Create Output table
+  # final_pu_corr = PU_corr %>%
+  #   as.data.frame() %>%
+  #   dplyr::select(id,cost,status)
+  #
+  # PU.dat file (planning unit file)
+  # write_delim(final_pu_corr,paste0("../R_output_files/MarxanInput_byCounty/",county_name[i],"/pu_corr.dat"),delim = " ")
+  
+}
+
+write_csv(cost_thresholds,"../R_output_files/MarxanInput_byCounty/cost_thresholds.csv")
+
+```

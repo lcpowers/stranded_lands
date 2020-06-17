@@ -1,0 +1,54 @@
+---
+title: "Marxan_Prioritizr"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(prioritizr)
+library(gurobi)
+library(tidyverse)
+
+pu <- read.table("../R_output_files/MarxanInput_byCounty/CUSTER/pu.dat", header = T)
+spec <- read.csv("../R_output_files/MarxanInput_byCounty/CUSTER/spec.dat")
+puvspr <- read.csv("../R_output_files/MarxanInput_byCounty/CUSTER/puvspr2.dat")
+bound <- read.table("../R_output_files/MarxanInput_byCounty/CUSTER/bound_inv.dat", header = T)
+
+marxan_budget = round(sum(pu$cost[pu$status == 1]))
+
+spec$prop = 0.5
+
+# build Marxan problem using data.frame objects
+mp2 <- marxan_problem(x = pu, spec = spec, 
+                      puvspr = puvspr, 
+                      bound = bound,
+                      blm = 100)
+
+
+print(mp2)
+solve(mp2)
+```
+
+```{r}
+
+p1 <- problem(x = pu, features = spec, cost_column = "cost", rij = puvspr) %>% 
+  add_max_features_objective(budget = 100000) %>% 
+  add_relative_targets(0.75)
+
+presolve_check(p1)
+s1 = solve(p1)
+
+p7 <- problem(x = pu, features = spec, cost_column = "cost", rij = puvspr) %>% 
+  add_max_features_objective(budget = marxan_budget) %>% 
+  add_relative_targets(0.75) %>% 
+  add_boundary_penalties(penalty = 5, data = bound) %>% 
+  add_binary_decisions() %>% 
+  add_gurobi_solver(gap = 0)
+
+s7 <- solve(p7, force = T)
+plot(s7)
+```
+

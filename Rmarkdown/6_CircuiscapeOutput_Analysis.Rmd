@@ -1,0 +1,38 @@
+---
+title: "Connectivity Analysis"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### 1. Load packages and data
+```{r load_data}
+library(rgdal)
+library(raster)
+
+# Montana NLCD raster
+mt_nlcd <- raster("../R_output_files/nlcd/nlcd_mt.tif")
+
+# Montana NLCD stranded raster
+mt_stranded <- raster("../R_output_files/nlcd/nlcd_mt_stranded.tif")
+
+# Cost-weighted distance raster
+cwd <- raster("../CS_output/Cost-weighted Distance from Least Cost Path1.tif")
+```
+
+
+### 2. Compare mean Cost-weighted distance of stranded land the same number of randomly selected cells
+```{r compareOutput_to_random}
+
+mt_stranded_pts <- rasterToPoints(mt_stranded, spatial = TRUE)
+mt_stranded_cwd <-raster::extract(cwd,mt_stranded_pts)
+mt_random_cwd <- as.vector(sampleRandom(cwd,size = length(mt_stranded_pts),na.rm=T))
+
+str_mean <- mean(mt_stranded_cwd,na.rm = T)
+rand_mean <- mean(mt_random_cwd)
+
+t.test(mt_stranded_cwd,y = mt_random_cwd, alternative = "greater")
+```
+

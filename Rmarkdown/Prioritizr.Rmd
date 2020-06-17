@@ -1,0 +1,149 @@
+---
+title: "Prioritizr"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(prioritizr)
+library(gurobi)
+library(sf)
+library(raster)
+```
+
+```{r}
+county_name <- "CUSTER"
+
+pu_dat = read.csv(paste0("../R_output_files/MarxanInput_byCounty/",county_name,"/pu.dat"))
+pu_shp = read_sf("../R_output_files/marxan_finalPU_shp/CUSTER/CUSTER_finalPU.shp") %>% 
+  dplyr::select(id,cost,status) 
+
+pu_shp$cost = round(pu_shp$cost/10000)
+
+stranded_budget = sum(pu_shp$cost[pu_shp$status == 1])
+
+spec_files = list.files(paste0("../R_output_files/species/",county_name), pattern = ".tif$", full.names = T)
+species_stack = stack(species_files)
+
+boundary_data <- read.table("../R_output_files/MarxanInput_byCounty/CUSTER/bound_inv.dat")
+colnames(boundary_data) <- c("id1","id2","boundary")
+```
+
+
+```{r}
+
+# Basic PU and conservation feature components
+p1 <- problem(x = pu_shp,features = species_stack,cost_column = "cost",  run_checks = T)
+
+# Adding in type of objective -- max coverage with budget constraining
+p2 <- problem(pu_shp,species_stack, cost_column = "cost") %>% 
+  add_max_cover_objective(budget = stranded_budget)
+
+presolve_check(p2)
+s2 <- solve(p2)
+plot(s2$solution_1)
+
+plot(s2)
+```
+
+
+```{r}
+# Adding in targets
+p3 <- problem(pu_shp,species_stack, cost_column = "cost") %>% 
+  add_max_features_objective(budget = stranded_budget) %>% 
+  add_relative_targets(0.75)
+
+presolve_check(p3)
+print(presolve_check(p3))
+
+s3 <- solve(p3, force = T)
+plot(s3)
+```
+
+
+```{r}
+# Adding in locked in and locket out constraints
+p4 <- problem(pu_shp,species_stack, cost_column = "cost") %>% 
+  add_max_features_objective(budget = stranded_budget) %>% 
+  add_relative_targets(0.75) %>% 
+  add_locked_in_constraints(pu_shp[pu_shp$status==2,]) %>% 
+  add_locked_out_constraints(pu_shp[pu_shp$status==3,]) 
+
+presolve_check(p4)
+print(presolve_check(p4))
+
+s4 <- solve(p4, force = T)
+plot(s4)
+```
+
+
+```{r}
+# Add boundary penalties
+# Read in Custer Resistance Layer
+custer_resistance = raster("../R_output_files/circuitscape/CS_resistance_input/CUSTER_resistance_270.asc") 
+crs(custer_resistance) <- crs(pu_shp)
+
+# Create connectivity matrix
+custer_conductivity_mat <- connectivity_matrix(x = pu_shp,y = (1/custer_resistance))
+
+p5 <- problem(pu_shp,species_stack, cost_column = "cost") %>% 
+  add_max_features_objective(budget = stranded_budget) %>% 
+  add_relative_targets(0.95) %>% 
+  add_locked_in_constraints(pu_shp[pu_shp$status==2,]) %>% 
+  add_locked_out_constraints(pu_shp[pu_shp$status==3,]) %>% 
+  add_boundary_penalties(penalty = 5,  data = boundary_data)
+```
+
+
+```{r}
+## Add decision types
+p6 <- problem(pu_shp,species_stack, cost_column = "cost") %>% 
+  add_max_features_objective(budget = stranded_budget) %>% 
+  add_relative_targets(0.75) %>% 
+  add_locked_in_constraints(pu_shp[pu_shp$status==2,]) %>% 
+  add_locked_out_constraints(pu_shp[pu_shp$status==3,]) %>% 
+  add_boundary_penalties(penalty = 5,data = custer_conductivity_mat) %>% 
+  add_binary_decisions()
+```
+
+
+```{r}
+## Add a solver
+p7 <- problem(pu_shp,species_stack, cost_column = "cost") %>% 
+  add_max_features_objective(budget = stranded_budget) %>% 
+  add_relative_targets(0.75) %>% 
+  add_locked_in_constraints(pu_shp[pu_shp$status==2,]) %>% 
+  add_locked_out_constraints(pu_shp[pu_shp$status==3,]) %>% 
+  add_boundary_penalties(penalty = 5, data = boundary_data) %>% 
+  add_binary_decisions() %>% 
+  add_gurobi_solver(gap = 0)
+
+s7 <- solve(p7, force = T)
+plot(s7)
+```
+
+
+```{r}
+## Generate a portfolio of solutions
+p8 <- problem(pu_shp,species_stack, cost_column = "cost") %>% 
+  add_max_features_objective(budget = stranded_budget) %>% 
+  add_relative_targets(0.50) %>% 
+  add_locked_in_constraints(pu_shp[pu_shp$status==2,]) %>% 
+  add_locked_out_constraints(pu_shp[pu_shp$status==3,]) %>% 
+  add_boundary_penalties(penalty = 5,data = custer_conductivity_mat) %>% 
+  add_binary_decisions() %>% 
+  add_gurobi_solver(gap = 0) %>% 
+  add_top_portfolio(number_solutions = 10)
+
+presolve_check(p8)
+
+s8 <- solve(p8, force = T)
+plot(s8[10:14])
+
+
+```
+
+

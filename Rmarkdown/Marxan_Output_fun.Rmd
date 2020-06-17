@@ -1,0 +1,81 @@
+---
+title: "marxan output"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+library(tidyverse)
+library(sf)
+library(rgdal)
+
+```
+
+
+```{r}
+marxanSSolution_fun = function(output_table,name){
+  
+  colnames(output_table) = c("pu_id","number")
+  
+  county_i_sections = read_sf("../R_output_files/marxan_scratch/finalPUs/CUSTER/CUSTER_finalPU_noCorr.shp") %>% 
+  dplyr::select("pu_id" = id,
+                cost,
+                status)
+  
+  custer_reserve <<- left_join(county_i_sections,
+                           output_table) %>% 
+    filter(!is.na(number))
+  
+  writeOGR(as(custer_reserve,"Spatial"),
+         "../../Marxan/Marxan_Output_spatial/",
+         name,
+         "ESRI Shapefile",
+         overwrite_layer = T)
+  
+}
+
+marxan_output = read.table(file = "../../Marxan/Marxan_Output_dat/16June2020/bound_inv_blm1000_ssoln.dat", header = F)
+
+name = "bound_inv_blm1000"
+
+marxanSSolution_fun(output_table = marxan_output, name = name)
+
+```
+
+
+
+```{r}
+
+best_output = read.csv(file = "../../Marxan/Marxan_Output_dat/16June2020/bound_inv_blm1000_best.dat", header = F)
+
+colnames(best_output) = c("pu_id","selected")
+best_output = filter(best_output, is.na(selected))
+
+best_output$pu_id = as.numeric(best_output$pu_id)
+
+county_i_sections = read_sf("../R_output_files/marxan_scratch/finalPUs/CUSTER/CUSTER_finalPU_noCorr.shp") %>% 
+  dplyr::select("pu_id" = id,
+                cost,
+                status)
+
+best_reserve <- left_join(county_i_sections,best_output) %>% 
+  filter(pu_id %in% best_output$pu_id & status != c(1,2))
+
+sum(best_reserve$cost)
+
+
+plot(best_reserve$geometry)
+
+writeOGR(as(best_reserve,"Spatial"),
+       "../../Marxan/Marxan_Output_spatial/",
+       paste0(name,"_best"),
+       "ESRI Shapefile",
+       overwrite_layer = T)
+
+
+```
+

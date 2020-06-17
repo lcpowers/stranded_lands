@@ -1,0 +1,215 @@
+---
+title: "Montana NLCD Zonal Statistics"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Work flow of this Rmarkdown document:
+1. Read in packages and data
+2. Load data:
+- NLCD raster
+- Montana outline shapefile
+- Montana Counties shapefile
+- Stranded Land shapefile
+
+3. Crop Stranded Land Shapefile to Montana Outline
+4. Crop NLCD raster to montana outline extent and resample to coarser resolution (currently 90m)
+5. Mask resampled NLCD to Montana outline
+6. Reclassify NLCD -- see code chunk for specifics
+7. Clean stranded land geometries (much faster in QGIS)
+8. Crop NLCD to stranded land
+
+If interested in looking at a particular county:
+9. Crop MT NLCD to county outline
+10. Crop stranded NLCD to that county
+11. Plot to check and visualize
+
+12. Write output shapefiles
+
+### 1. Load packages and data
+```{r packages_and_data}
+
+library(tidyverse)
+library(raster)
+library(rgdal)
+library(sf)
+library(cleangeo)
+library(parallel)
+
+# setwd("~/StrandedLand/stranded_repo") # Bren R server
+# setwd("~/Desktop/StrandedLand/stranded_repo") # Desktop
+
+# output_resolution = 90
+output_resolution = 270 # Make sure this matches with RMD 3
+```
+
+### 2. Load Data
+```{r load_data}
+
+# NLCD: Lower 48 NLCD raster data (2016)
+nlcd <- raster("../R_input_files/nlcd/NLCD_2016_Land_Cover_L48_20190424.img")
+
+# Shapefile: State of Montana outline
+mt_outline <- readOGR("../R_input_files/mt_outline/StateofMontana.shp") %>% 
+  # Put into NLCD CRS so the layers overlap 
+  spTransform(.,crs(nlcd)) 
+
+# Shapefile to simple features. Used later with stranded land layer
+mt_sf = st_as_sf(mt_outline)
+  
+# Shapefile of Montana County outlines
+mt_counties <- readOGR("../R_input_files/mt_counties/County.shp") %>% 
+  # Put into NLCD CRS so the layers overlap 
+  spTransform(.,crs(nlcd)) 
+
+# Shapefile: Strande Land
+stranded_sf <- read_sf("../R_input_files/stranded_shp/mt_strandedMaster_clean.shp") %>% 
+  st_transform(.,crs(nlcd)) %>% 
+  st_simplify() %>% 
+  filter(stranded == 1)
+
+```
+
+### 3. Crop Stranded Land shapfile to the outline of Montana (spans most of the Western US)
+```{r crop_stranded_land}
+
+# Crop the stranded shapefile to Montana 
+mt_stranded = st_intersection(stranded_sf,mt_sf) %>% as(.,"Spatial")
+
+```
+
+### 4. Crop NLCD to extent of Montana outline, then resample to the output_resolution (defined in first code chunk)
+```{r crop_resample_nlcd}
+# Crop NLCD to Montana Outline (shrink extent)
+nlcd_crop = crop(nlcd,extent(mt_outline))
+
+## Create raster object to resample NLCD with
+# Set extent equal to cropped NLCD created above
+rsmpl_ras <- raster(nlcd_crop)
+rsmpl_ext <- extent(nlcd_crop)
+extent(rsmpl_ras) <- rsmpl_ext
+
+# Set resolution
+res(rsmpl_ras) <- output_resolution
+
+# Resample NLCD mt to desired resolution
+nlcd_resample = resample(nlcd_crop, rsmpl_ras, method = "ngb")
+
+# Write output raster
+writeRaster(nlcd_resample,paste0("../R_output_files/nlcd/mt_nlcd_rsmpl_",output_resolution,".tif"),overwrite=TRUE)
+```
+
+### 5. Mask resampled NLCD to MT outline
+```{r nlcd_mt_mask}
+
+# Define core cluster size
+n_cores <- detectCores()-6 
+
+timestamp() # For reference
+
+# Initiate use of core cluster
+beginCluster(n_cores) 
+# Resample
+nlcd_mt <- clusterR(nlcd_resample, mask, args=list(mt_outline))
+# Stop used of core cluster
+endCluster()
+
+timestamp() # For reference
+
+# Write output raster
+writeRaster(nlcd_mt,paste0("../R_output_files/nlcd/mt_nlcd_",output_resolution,".tif"),overwrite=TRUE)
+```
+
+### 6. Reclassify NLCD Raster to simplify classes
+```{r nlcd_reclass}
+
+rcl_mat = c(20,22.5,20, # <50% developed: Low intensity
+            22.5,24,25, # 50 - 100% developed: High intensity
+            30,32,30, # Barren
+            40,44,40, # Forest
+            50,53,50, # Shrubland
+            70,74,70, # Grassland
+            80,83,80, # Cultivated
+            89,96,90) # Wetlands
+
+# Reclassify Montana NLCD raster
+timestamp()
+
+beginCluster(n_cores)
+nlcd_mt_rcl <- clusterR(nlcd_mt, reclassify,args = list(rcl_mat,include.lowest=TRUE))
+endCluster()
+
+timestamp()
+```
+
+### 7. Crop MT NLCD to just Stranded Land
+```{r crop_mtNLCD_toStranded}
+timestamp() #### 
+
+beginCluster(n_cores) #
+# Mask Montana NLCD to just Stranded Land in Montana
+nlcd_mt_stranded <- clusterR(nlcd_mt_rcl, mask, args=list(mt_stranded))
+endCluster()
+
+timestamp() #### 
+```
+
+### 9. Crop MT NLCD to outline of county of interest -- needs updating
+```{r crop_mtNLCD_toGB}
+
+# beginCluster(n_cores)
+# # Crop Montana NLCD to GB extent
+# nlcd_gb_crop = crop(nlcd_mt_rcl,extent(gb_outline))
+# # Mask nlcd_gb_crop to GB outline
+# nlcd_gb <- clusterR(nlcd_gb_crop, mask, args = list(gb_outline))
+# endCluster()
+
+```
+
+### 10. Crop GB NLCD to just stranded land in GB
+```{r crop_gbNLCD_toStranded}
+# 
+# beginCluster(n_cores)
+# # Crop GB NLCD to just stranded land in GB
+# nlcd_gb_stranded <- clusterR(nlcd_gb, mask, args = list(gb_stranded))
+# endCluster()
+
+```
+
+### 11. Plot all to check overlap
+```{r check_overlap}
+
+# # Montana Overview
+# plot(nlcd_mt)
+# plot(nlcd_mt_stranded,col="red",add=TRUE)
+# plot(nlcd_gb,col=topo.colors(10),add=TRUE)
+# 
+# # Gallatin-Broadwater
+# plot(nlcd_gb)
+# plot(nlcd_gb_stranded, col = "red", add=TRUE)
+
+```
+
+### 12. Write Output Files
+```{r write_output}
+
+# dir.create("./output/stranded_shp/montana", recursive = T)
+# dir.create("./output/stranded_shp/gb")
+# dir.create("./output/nlcd/")
+
+writeOGR(obj = mt_stranded,
+         dsn = "../R_output_files/stranded_shp/montana/",
+         layer = "mt_stranded.shp",
+         driver = "ESRI Shapefile",
+         overwrite_layer = TRUE)
+
+# Montana NLCD
+writeRaster(nlcd_mt_rcl,paste0("../R_output_files/nlcd/mt_nlcd_rcl_",output_resolution,".tif"),overwrite=TRUE)
+
+# Montana stranded NLCD
+writeRaster(nlcd_mt_stranded,paste0("../R_output_files/nlcd/mt_nlcd_rcl_strnd_",output_resolution,".tif"),overwrite=TRUE)
+```
+

@@ -1,0 +1,192 @@
+---
+title: "Marxan Input Layers By County"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load Packages
+```{r packages, message=FALSE}
+library(rgdal)
+library(raster)
+library(cleangeo)
+library(tidyverse)
+library(sf)
+library(parallel)
+
+options(scipen = 0)
+```
+
+## NLCD data
+```{r nlcd}
+# NLCD
+nlcd <- raster("../R_output_files/nlcd/mt_nlcd_rcl_270.tif")
+
+### If want to make every NLCD class a conservation feature
+## Create a table with the species penalty factor and NLCD class name, to be joined to zonal stats data at in the following for loop
+# nlcd_desc_table = data.frame(id = c(11,12,20,25,30,40,50,70,80,90),
+#                              spf = c(0, 0, 0, 0, 3, 20, 20, 20, 1, 5),
+#                              target_coef = c(0.25,0.25,0,0,0.5,0.75,0.75,0.75,0.5,0.5),
+#                              name =  c("water","snow","low_dev","high_dev","barren","forest","scrub","grassland","ag","wetland"))
+
+
+## Making biologically important NLCD classes a conservation feature, and Ag land as an important economic feature of many/all counties in Montana
+## Create a table with the species penalty factor and NLCD class name, to be joined to zonal stats data at in the following for loop
+nlcd_desc_table = data.frame(id = c(11,12,30,40,50,70,80,90),
+                             spf = c(1, 1, 1, 2, 2, 2, 1, 1),
+                             target_coef = c(1,1,1,1,1,1,1,1),
+                             name =  c("water","snow","barren","forest","scrub","grassland","ag","wetland"))
+```
+
+Loop settings
+```{r loop_settings}
+
+counties = read_sf("../R_input_files/mt_counties/County.shp")
+
+# If want to loop through all counties, uncomment the following line
+county_names = as.vector(counties$NAME)
+
+county_names = "CUSTER"
+
+```
+
+
+# 2. The Conservation Feature File (spec.dat)
+## NLCD data
+```{r NLCD}
+
+## Initialize an empty list where the output for each county from the following loop will be stored
+NLCDbyCounty_list = vector(mode = "list",length = length(county_names))
+
+## Define the names of each element in the list created above for easier reference
+names(NLCDbyCounty_list) = county_names
+
+timestamp()
+for(i in 1:length(county_names)){
+  
+  # County name i
+  county_name = county_names[i]
+  
+  # Print current county name to show progress
+  print(county_name)
+  
+  # Get stranded planning units
+  # county_i_sections = read_sf(paste0("../R_output_files/marxan_finalPU_shp/",county_name,"/",county_name,"_finalPU.shp")) %>%
+  #   filter(status == 1)
+  
+  county_i_sections = read_sf("../R_input_files/PUs/custer_croppedforMarxan.shp") %>% 
+    filter(status == 1)
+  
+  # crop NLCD raster to current county extent then mask to the stranded planning units
+  nlcd_mask = raster::crop(nlcd,extent(county_i_sections)) %>% mask(.,county_i_sections)
+  
+  # Determine the total frequency of each NLCD class across stranded planning units
+  nlcd_freq = as.data.frame(freq(nlcd_mask, na.rm = T))
+  
+  # Define column names
+  colnames(nlcd_freq) = c("id","total")
+  
+  # Get rid of NA row
+  nlcd_freq = nlcd_freq %>% filter(!is.na(id))
+  
+  # Merge the NLCD_freq table with the spf/name table created before the loop. This attaches descriptions and SPFs, and also filters out NLCD classes that we are not interested in conserving but are present in the stranded planning units
+  nlcd_freq = merge(nlcd_freq,nlcd_desc_table)
+  nlcd_freq$target = round(nlcd_freq$total * nlcd_freq$target_coef)
+  
+  nlcd_freq = dplyr::select(nlcd_freq,c(id,target,spf,name))
+  
+  # Add the frequency table as an element to the County_NLCDfreq_list
+  NLCDbyCounty_list[[i]] = nlcd_freq
+  
+}
+
+```
+
+## Species Data
+```{r species}
+
+## Create a table with the species penalty factor and NLCD class name, to be joined to zonal stats data at in the following for loop
+species_desc_table = data.frame(id = c(101,102,103,104,105,106,107,108,109,110,111,112),
+                             spf = c(2,2,2,2,2,2,2,2,2,2,2,2),
+                             target_coef = c(1,1,1,1,1,1,1,1,1,1,1,1),
+                             name =  c("blackbear", # 101
+                                       "blacktailedprariedog", #102
+                                       "brownbear", # 103
+                                       "cougar", # 104
+                                       "elk", # 105
+                                       "lynx", # 106
+                                       "moose", # 107
+                                       "pronghorn", # 108
+                                       "pygmyrabbit", # 109
+                                       "sagegrouse", # 110
+                                       "swiftfox", # 111
+                                       "wolverine")) # 112
+
+
+## Initialize an empty list where the output for each county from the following loop will be stored
+SPECIESbyCounty_list = vector(mode = "list",length = length(county_names))
+
+## Define the names of each element in the list created above for easier reference
+names(SPECIESbyCounty_list) = county_names
+
+timestamp()
+for(i in 1:length(county_names)){
+  
+  # County name i
+  county_name = county_names[i] %>% print()
+  
+  county_i_sections = read_sf("../R_input_files/PUs/custer_croppedforMarxan.shp") %>% 
+    filter(status == 1)
+  
+  # Filter full Montana county shapefile to the current(i) county
+  # county_i_sections = read_sf(paste0("../R_output_files/marxan_finalPU_shp/",county_name,"/",county_name,"_finalPU.shp")) %>%
+  #   filter(status == 1)
+  
+  species_files = list.files(paste0("../R_output_files/species/",county_name), pattern = ".tif$", full.names = T)
+  species_stack = stack(species_files)
+  
+  # crop species raster stack to current county extent then mask to stranded planning units
+  species_mask = mask(species_stack,county_i_sections)
+  
+  # Determine the frequency of each species class in county i
+  species_df = data.frame(name = names(species_mask),
+                            total = cellStats(species_mask,sum))
+  rownames(species_df) <- NULL
+  
+  species_df_merge = merge(species_df,species_desc_table)
+  species_df_merge$target = round(species_df_merge$total * species_df_merge$target_coef)
+  
+  species_df_final = dplyr::select(species_df_merge,c(id,target,spf,name))
+  
+  # Add the frequency table as an element to the Countyi_speciesfreq_list
+  SPECIESbyCounty_list[[i]] = species_df_final
+  
+}
+
+
+```
+
+
+```{r}
+
+## Write output conservation feature files 
+for(i in 1:length(NLCDbyCounty_list)){
+  
+  ## Get correct element from NLCD and species output lists
+  nlcd <- NLCDbyCounty_list[[i]]
+  species = SPECIESbyCounty_list[[i]]
+  
+  # Rbind for the complete spec.dat file
+  spec = rbind(nlcd,species)
+  
+  ## Write output
+  write_delim(spec, path = paste0("../R_output_files/MarxanInput_byCounty/",county_names[i],"/spec_crop.dat"), delim =" ")
+  
+}
+
+```
+
+
+

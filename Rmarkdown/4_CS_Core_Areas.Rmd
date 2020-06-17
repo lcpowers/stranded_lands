@@ -1,0 +1,252 @@
+---
+title: "Preparing core area layers for Circuitscape"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### 1. Packages and data
+```{r packages_data}
+
+library(tidyverse)
+library(rgdal)
+library(raster)
+library(sf)
+library(parallel)
+library(rgeos)
+library(cleangeo)
+
+# NLCD MT raster
+mt_nlcd <- raster("../R_output_files/nlcd/mt_nlcd_270.tif")
+
+# Montana Outline
+mt_outline <- read_sf("../R_input_files/mt_outline/StateofMontana.shp") %>% 
+  st_transform(.,crs(mt_nlcd))
+
+# Montana Counties
+mt_counties <- read_sf("../R_input_files/mt_counties/County.shp") %>% 
+  st_transform(.,crs(mt_nlcd))
+
+# Protected Areas Database 
+pad <- read_sf("../R_input_files/mt_pad/PAD_combined_clean.shp") %>%
+  st_transform(.,crs(mt_nlcd)) %>% 
+  st_simplify()
+
+```
+
+### 2. Protected Areas Database (PAD) GAP Core Areas
+```{r pad_gap}
+# Filter for GAP 1 or 2 parcels -- parcels that manage for biodiversity
+pad_gap <- pad %>% 
+  filter(GAP_Sts %in% c(1,2)) %>% 
+  group_by(GAP_Sts) %>% 
+  summarise() %>% 
+  st_buffer(.,200) %>% 
+  as(.,"Spatial") %>%
+  disaggregate(.) %>%
+  st_as_sf() %>% 
+  st_buffer(.,-200 ) %>% 
+  dplyr::select() %>% 
+  mutate("category" = "pad_gap",
+    "object_id" = paste0(1:nrow(.),"_gap"))
+
+
+```
+
+### 3. Adding in Fish and Wildlife 
+```{r fishandwildlife}
+# Montana Fish, Wildlife, and Parks Land Parcels
+fwp = read_sf("../R_input_files/MT_FWP_Lands_Parcels_shp/020b61ed-402c-4012-8e4c-2bf60a7cd0fe202047-1-pd7i66.tiob.shp") %>% 
+  st_transform(.,crs(mt_nlcd)) %>% 
+  filter(!SITETYPE %in% c("FAS","HTC")) %>% # Remove fishing access sites and fish hatcheries
+  st_buffer(.,200) %>% # Workaround to fix geometry that results from weird/convoluted boundaries
+  group_by(SITEID) %>% # Group by site id
+  summarise() %>% # Combine polygons with the same site id
+  st_buffer(.,-200) %>% 
+  dplyr::select() %>% 
+  mutate("category" = "fishwildlifeparks",
+    "object_id" = paste0(1:nrow(.),"_fwp"))
+
+# Join PAD GAP 1 & 2 with fish and wildlife polygons
+gap_fwp_join = st_join(pad_gap, fwp, left = T, largest = T)
+
+# Get list of Conservation Easement polygons that joined with PAD data
+joined_fwpIDs = na.omit(gap_fwp_join$object_id.y)
+
+# Clean up joined data set -- anything that joined will take the ID of the Gap Status Polygon
+gap_fwp_join = dplyr::select(gap_fwp_join,-c(category.y,object_id.y,)) # Remove columns from join associated with access data
+colnames(gap_fwp_join)[1:2]= c("category","object_id")
+
+# Filter out Conservation Easement parcels that joined with the GAP data set
+fwp_fltr = filter(fwp,!(object_id %in% joined_fwpIDs))
+
+# Combine the joined data set with the PAD Access parcels that did not join. 
+gap_fwp_final = rbind(gap_fwp_join,fwp_fltr)
+
+```
+
+
+### 4. Adding in Conservation Easements
+```{r conservation_easements}
+
+# Conservation Easements
+cons_easements = read_sf("../R_input_files/ConEasements/ConEasements.shp") %>% 
+  st_transform(.,crs(mt_nlcd)) %>% 
+  dplyr::select() %>% 
+  mutate("category" = "conservation_easement",
+    "object_id" = paste0(1:nrow(.),"_consease")) %>% 
+  st_buffer(.,200) %>% # Workaround to fix geometry that results from weird/convoluted boundaries
+  st_buffer(.,-200)
+  
+# Join Final PAD core areas with conservation easement core areas
+gap_fwp_consease_join = st_join(gap_fwp_final,cons_easements, left = T, largest = T)
+
+# Get list of Conservation Easement polygons that joined with PAD data
+joined_conseaseIDs = na.omit(gap_fwp_consease_join$object_id.y)
+
+# Clean up joined data set -- anything that joined will take the ID of the Gap Status Polygon
+gap_fwp_consease_join = dplyr::select(gap_fwp_consease_join,-c(category.y,object_id.y,)) # Remove columns from join associated with access data
+
+colnames(gap_fwp_consease_join)[1:2]= c("category","object_id")
+
+# Filter out Conservation Easement parcels that joined with the GAP data set
+consease_fltr = filter(cons_easements,!(object_id %in% joined_conseaseIDs))
+
+# Combine the joined data set with the PAD Access parcels that did not join. 
+gap_fwp_consease_final = rbind(gap_fwp_consease_join,consease_fltr)
+
+# Empty geometry fixing
+gap_fwp_consease_final$empty_geos = as.factor(is.na(st_dimension(gap_fwp_consease_final))) # find which one is empty
+gap_fwp_consease_final = filter(gap_fwp_consease_final,empty_geos=="FALSE") %>%  # Filter out the empty one and remove the extra column
+  select(-empty_geos)
+    
+```
+
+### 5. Adding in Protected Area Database Restricted Access parcels
+```{r pad_access}
+## Create another set of polygons based on the "Access" column -- rationale is that many of these are manage or used a research for biodiversity, and many relatively natural places with closed or restricted access serve has habitat
+pad_access = pad %>% 
+  filter(d_Access %in% c("Restricted Access","Closed") & !d_Des_Tp %in% c("Agricultural Easement",
+                                                                          "Private Agriculture",
+                                                                          "Ranch Easement")) %>% 
+  group_by(d_Access) %>% # Select access column
+  summarise() %>% # Combine polygons based on the d_Access factor level
+  st_buffer(.,200) %>% # Buffer to mitigate spatial issues that arise from complicated/convoluted polygon shapes
+  as(.,"Spatial") %>% # Convert to shapefile
+  disaggregate(.) %>% # Separate polygons that are not spatially connected
+  st_as_sf() %>% # Turn back into spatial dataframe
+  st_buffer(.,-200) %>% # remove the buffer
+  dplyr::select() %>% # get rid of all non-geometry columns
+  mutate("category" = "pad_access", # generate two new columns that contain the category and a unique ID
+    "object_id" = paste0(1:nrow(.),"_access"))
+
+# Spatial join between GAP and access data sets
+all_join = st_join(gap_fwp_consease_final, pad_access, left = T, largest = T)
+
+# Get a list of the Access object IDs that joined to the GAP data set
+joined_accessIDs = na.omit(all_join$object_id.y)
+
+# Clean up joined data set -- anything that joined will take the ID of the Gap Status Polygon
+all_join = dplyr::select(all_join,-c(category.y,object_id.y,)) # Remove columns from join associated with access data
+
+colnames(all_join)[1:2]= c("category","object_id")
+
+# Filter out PAD Access parcels that joined with the GAP data set
+pad_access_fltr = filter(pad_access,!object_id %in% joined_accessIDs)
+
+# Combine the joined data set with the PAD Access parcels that did not join. 
+all_final = rbind(all_join,pad_access_fltr)
+
+all_final$area = as.numeric(st_area(all_final))
+
+# Write shapefile to check
+writeOGR(as(all_final,"Spatial"),
+         dsn = "../R_output_files/circuitscape/core_area_shapefiles/MONTANA/",
+         "MONTANA_coreareas",
+         "ESRI Shapefile",
+         overwrite_layer = T)
+
+```
+
+### 6. Function to crop to county
+```{r create_county_core_area_function}
+
+coreareas_fun = function(county_name, core_quality_table, shapefile = T, raster_nodes = T){
+  
+  print(county_name)
+  
+  county_i = filter(mt_counties, NAME == county_name) %>% 
+    dplyr::select(NAME) %>% 
+    as(.,"Spatial")
+  
+  county_i_cores = raster::intersect(core_areas,county_i) %>% # Crop core areas to county
+    st_as_sf() # Turn into spatial data frame
+  
+  # Merge Core Areas SF with core quality table
+  county_i_cores_merge = merge(county_i_cores,core_quality_table)
+  
+  county_i_cores_merge$core_quality = county_i_cores_merge$area*county_i_cores_merge$multiplier
+  
+  county_i_cores_final <<- county_i_cores_merge %>% 
+    arrange(-core_quality) %>% 
+    head(5)
+  
+  county_i_cores_final$core_id = 1:nrow(county_i_cores_final)
+  
+  if(shapefile){
+  
+  writeOGR(as(county_i_cores_final,"Spatial"),
+           paste0("../R_output_files/circuitscape/core_area_shapefiles/",county_name),
+           paste0(county_name,"_coreareas_final"),
+           "ESRI Shapefile",
+           overwrite_layer = T)
+    
+  }
+  
+  if(raster_nodes){
+    
+    core_centroids = st_centroid(x = county_i_cores_final)
+    core_nodes <<- rasterize(x = core_centroids,y = mt_nlcd, field = "core_id")
+    NAvalue(core_nodes) = -9999
+    
+    writeRaster(core_nodes,paste0("../R_output_files/circuitscape/core_node_asciis/",
+                                  county_name,"_corenodes.asc"), format = "ascii", overwrite = T)
+    
+  }
+  
+}
+
+
+```
+
+### 7. Apply function
+```{r apply_core_area_function}
+
+# Need polygons for Linkage Mapper and Marxan (core polys)
+# Rasterized centroids for Circuitscape (core nodes)
+core_areas = readOGR("../R_output_files/circuitscape/core_area_shapefiles/MONTANA/MONTANA_coreareas.shp")
+
+# Loop through all counties
+county_names = as.list(mt_counties$NAME)
+
+# Choose one county to create core areas for
+# county_names = "CUSTER"
+
+core_quality_table = data.frame(category = c("pad_gap","fishwildlifeparks","conservation_easement","pad_access"),
+                                multiplier = c(4,3,2,1)) ## Do more digging about how these lands are managed to decide
+
+
+
+for(i in 1:length(county_names)){
+  
+  county_name = county_names[i]
+  
+  coreareas_fun(county_name = county_name, core_quality_table = core_quality_table)
+  
+}
+
+```
+
+

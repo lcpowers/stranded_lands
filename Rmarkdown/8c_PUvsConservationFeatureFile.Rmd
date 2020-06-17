@@ -1,0 +1,233 @@
+---
+title: "PUvsConservationFeatureFIle"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Packages and settings
+```{r packages}
+library(rgdal)
+library(raster)
+library(tidyverse)
+library(sf)
+library(parallel)
+
+options(scipen = 0)
+```
+
+## NLCD Data
+```{r data}
+# NLCD Classes that are conservation features: 11,13,30,40,50,70,80,90
+# NOT conservation features: 20, 25 
+
+nlcd = raster("../R_output_files/nlcd/mt_nlcd_rcl_270.tif")
+
+nlcd = reclassify(x = nlcd,rcl = c(-Inf,1,NA,
+                                   19,26,NA))
+freq(nlcd)
+
+```
+
+
+## Loop settings
+```{r loop_settings}
+
+## If want to loop through all counties, uncomment the following line
+# county_names = as.vector(counties$names)
+
+county_names = "CUSTER"
+```
+
+
+# The Conservation Feature vs PU file (puvspr.dat)
+## Conservation Feature == NLCD Land Classes
+```{r CFvsPU, message=FALSE, warning=FALSE}
+
+NLCDbySection_list = vector(mode = "list",length = length(county_names))
+names(NLCDbySection_list) = county_names
+
+timestamp()
+
+for(i in 1:length(county_names)){
+  
+  county_name = county_names[i]
+  
+  # Print county name i to show progress
+  print(c(i,county_name))
+  
+  # Filter full Montana county shapefile for just the current county
+  county_i_PUs = read_sf(paste0("../R_output_files/marxan_finalPU_shp/",county_name,"/",county_name,"_finalPU.shp"))
+  
+  ## NLCD county i crop ##
+  nlcd_county_crop = crop(nlcd,county_i_PUs)
+
+  ## NLCD county i mask ##
+  nlcd_county_mask = mask(nlcd_county_crop, county_i_PUs)
+  
+  ## Get section IDs for current county
+  PU_ids = county_i_PUs$id
+  
+  ## Initialize data.frame for current county. The count of NLCD classes in each section within county 'i' will be placed in this data.frame.
+  output_df_nlcd = data.frame(value = double(),
+                   count = double(),
+                   prop = double(),
+                   id = character())
+  
+  ## For loop to get NLCD class frequency for each section (PU) within county i ####
+  for(j in PU_ids){
+    
+    # Show current PU id index for progress check
+    print(PU_ids %>% {which(. == j)})
+    
+    # Select section
+    section_i = st_as_sf(county_i_PUs) %>% 
+      filter(id == j) %>% 
+      as(.,"Spatial")
+    
+    # crop NLCD raster to current section extent
+    nlcd_section_crop = raster::crop(nlcd_county_mask,section_i)
+
+    # Mask NLCD to current section outline
+    nlcd_section_mask = raster::mask(nlcd_section_crop,section_i)
+    
+    # Determine the frequency of each nlcd class in section j of county i
+    nlcdFreq_sections = as.data.frame(freq(nlcd_section_mask, na.rm = T))
+  
+    # Get rid of NA row
+    nlcdFreq_sections = nlcdFreq_sections %>% 
+      filter(!is.na(value))
+  
+    # Count total number of cells with NLCD values
+    total_cells = sum(nlcdFreq_sections$count)
+  
+    # Find the proportion contained in each class
+    # nlcdFreq_sections$prop = round(nlcdFreq_sections$count/total_cells,4)
+    
+    # Add in PU(section) id column
+    nlcdFreq_sections$pu_id = rep(x = as.character(j),
+                                  times = nrow(nlcdFreq_sections))
+    
+    # Progressively build output dataframe
+    output_df_nlcd = rbind(output_df_nlcd,nlcdFreq_sections)
+    
+  }
+  
+    county_i_features = read.table(paste0("../R_output_files/MarxanInput_byCounty/",county_name,"/spec.dat"), header = T) %>% 
+      dplyr::select(value = id)
+  
+    output_df_nlcd_merge = merge(output_df_nlcd,county_i_features)
+  
+    # Add the frequency table as an element to the County_NLCDfreq_list
+    NLCDbySection_list[[i]] = output_df_nlcd_merge
+  
+}
+
+```
+
+## Conservation Features == Species
+```{r species}
+
+SpeciesbySection_list = vector(mode = "list",length = length(county_names))
+names(SpeciesbySection_list) = county_names
+
+timestamp()
+
+for(i in 1:length(county_names)){
+  
+  county_name = county_names[i]
+  
+  # Print county name i to show progress
+  print(c(i,county_name))
+  
+  species_files = list.files(paste0("../R_output_files/species/",county_name), pattern = ".tif$", full.names = T)
+  
+  species_stack = stack(species_files)
+  
+  # Get final PU file for current county
+  county_i_PUs = read_sf(paste0("../R_output_files/marxan_finalPU_shp/",county_name,"/",county_name,"_finalPU.shp"))
+  
+  ## Get section IDs for current county
+  PU_ids = county_i_PUs$id
+  
+  ## Initialize data.frame for current county. The count of NLCD classes in each section within county 'i' will be placed in this data.frame.
+  output_df_spec = data.frame(species = double(),
+                   amount = double(),
+                   pu = character())
+  
+  ## Loop to get NLCD class frequency for each section (PU) within county i ####
+  for(j in PU_ids){
+    
+    # Show current PU id index for progress check
+    print(PU_ids %>% {which(. == j)})
+    
+    # Select section
+    section_i = st_as_sf(county_i_PUs) %>% 
+      filter(id == j) %>% 
+      as(.,"Spatial")
+    
+    # crop NLCD raster to current section extent
+    species_section_crop = raster::crop(species_stack,section_i)
+
+    # Mask NLCD to current section outline
+    species_section_mask = raster::mask(species_section_crop,section_i)
+    
+    # 
+    species_df = data.frame(species = names(species_section_mask),
+                            amount = cellStats(species_section_mask,sum)) %>% 
+      filter(amount>0)
+    
+    rownames(species_df) <- NULL
+  
+    # Add in PU(section) id column
+    species_df$pu = rep(x = as.character(j),
+                                  times = nrow(species_df))
+    
+    # Progressively build output dataframe
+    output_df_spec = rbind(output_df_spec,species_df)
+    
+  }
+  
+  county_i_features = read.table(paste0("../R_output_files/MarxanInput_byCounty/",county_name,"/spec.dat"), header = T) %>% 
+    select(id,name)
+  
+  output_df_spec_merge = merge(output_df_spec,county_i_features, by.x = 'species', by.y = 'name') %>% 
+    dplyr::select("species" = id,
+                  pu, amount)
+  
+  # Add the frequency table as an element to the County_NLCD freq_list
+  SpeciesbySection_list[[i]] = output_df_spec_merge
+  
+}
+
+```
+
+
+```{r write_output}
+
+for(i in 1:length(NLCDbySection_list)){
+  
+  # Preparing NLCD puvspr2 data
+  tmp_nlcd <- NLCDbySection_list[[i]]
+  tmp_nlcd = tmp_nlcd %>% 
+    dplyr::select(value,pu_id,count)
+  colnames(tmp_nlcd) <- c("species","pu","amount")
+  
+  # Bring in species NLCD puvspr2 data 
+  tmp_species <- SpeciesbySection_list[[i]]
+  
+  puvspr2 = rbind(tmp_nlcd, tmp_species)
+  
+  write_delim(puvspr2, path = 
+              paste0("../R_output_files/MarxanInput_byCounty/",county_name[i],"/puvspr2.dat"))
+  
+}
+```
+
+
+
+
+
+
