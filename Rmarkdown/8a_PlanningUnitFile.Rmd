@@ -157,9 +157,9 @@ nlcd_urban_shp <- read_sf("../R_output_files/nlcd/nlcd_urban_270.shp") %>%
 
 major_roads = read_sf("../R_output_files/transpo/major_roads_270_polys.shp")
 
-corridor50k_pus = read.table("../../CS_LM_output/CS/05062020_50k_resistances_3columns.dat")
-
-corridor50k_pus = as.numeric(unique(corridor50k_pus$V1))
+# corridor50k_pus = read.table("../../CS_LM_output/CS/05062020_50k_resistances_3columns.dat")
+# 
+# corridor50k_pus = as.numeric(unique(corridor50k_pus$V1))
 
 # Create a cost threshold table
 cost_thresholds = data.frame(county_name = county_names,
@@ -188,7 +188,7 @@ for(i in 1:length(county_names)){
     st_buffer(.,-50) # Prevents stranded parcels from joining with adjacent sections/PUs 
   
   #### Status = 2. Locked into reserve system -- core areas used in circuitscape analysis
-  core_areas = read_sf("../R_output_files/circuitscape/core_area_shapefiles/",county_name,"/",county_name,"_coreareas_final.shp") %>% 
+  core_areas = read_sf(paste0("../R_output_files/circuitscape/core_area_shapefiles/",county_name,"/",county_name,"_coreareas_final.shp")) %>% 
     dplyr::select() %>% 
     mutate(status.core = 2)
   
@@ -205,6 +205,9 @@ for(i in 1:length(county_names)){
   
   ## Merge roads and urban shapefiles into one shapefile
   locked_out = rbind(x = county_i_roads,y = county_i_urban)
+  
+  locked_out = st_buffer(locked_out,10) %>% 
+    st_buffer(.,-10)
   
   ### Bind roads/urban to locked out public land
   # locked_out = rbind(locked_out,locked_out_publicLand)
@@ -254,7 +257,7 @@ for(i in 1:length(county_names)){
   # Find the cost threshold for Marxan, based on the cost of sections with stranded land in them
   cost_thresholds[i,2] = sum(final_pu$cost[final_pu$status == 1])
   
-  write_delim(final_pu,paste0("../R_output_files/MarxanInput_byCounty/",county_name[i],"/pu.dat"),delim = " ")
+  write_delim(final_pu,paste0("../R_output_files/MarxanInput_byCounty/",county_name,"/pu.dat"),delim = " ")
   
   #### Creating PU file with planning units outside of Corridor locked out
   # 

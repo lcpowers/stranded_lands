@@ -11,25 +11,16 @@ knitr::opts_chunk$set(echo = TRUE)
 library(prioritizr)
 library(gurobi)
 library(tidyverse)
+library(raster)
 
 pu <- read.table("../R_output_files/MarxanInput_byCounty/CUSTER/pu.dat", header = T)
-spec <- read.csv("../R_output_files/MarxanInput_byCounty/CUSTER/spec.dat")
+spec <- read.table("../R_output_files/MarxanInput_byCounty/CUSTER/spec.dat", header = T)
 puvspr <- read.csv("../R_output_files/MarxanInput_byCounty/CUSTER/puvspr2.dat")
 bound <- read.table("../R_output_files/MarxanInput_byCounty/CUSTER/bound_inv.dat", header = T)
+resist_layer <- raster("../R_output_files/circuitscape/CS_resistance_input/CUSTER_resistance_270.asc")
 
 marxan_budget = round(sum(pu$cost[pu$status == 1]))
 
-spec$prop = 0.5
-
-# build Marxan problem using data.frame objects
-mp2 <- marxan_problem(x = pu, spec = spec, 
-                      puvspr = puvspr, 
-                      bound = bound,
-                      blm = 100)
-
-
-print(mp2)
-solve(mp2)
 ```
 
 ```{r}

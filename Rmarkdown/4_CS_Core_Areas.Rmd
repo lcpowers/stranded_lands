@@ -9,7 +9,6 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ### 1. Packages and data
 ```{r packages_data}
-
 library(tidyverse)
 library(rgdal)
 library(raster)
@@ -28,23 +27,39 @@ mt_outline <- read_sf("../R_input_files/mt_outline/StateofMontana.shp") %>%
 # Montana Counties
 mt_counties <- read_sf("../R_input_files/mt_counties/County.shp") %>% 
   st_transform(.,crs(mt_nlcd))
+```
+
+### 2. Wilderness Areas
+```{r packages_data}
+# Wilderness Areas for the National Wilderness Preservation System Database
+wilderness <- read_sf("../R_input_files/Wilderness_Areas/Wilderness_Areas_103019.shp") %>% 
+  st_transform(.,crs(mt_nlcd)) %>% 
+  filter(str_detect(STATE,"MT")) %>% 
+  summarise() %>% 
+  as(.,"Spatial") %>% 
+  disaggregate() %>% 
+  st_as_sf() %>% 
+  dplyr::select() %>% 
+  mutate("category" = "wilderness",
+    "object_id" = paste0(1:nrow(.),"_wild"))
+
+```
+
+### 3. Protected Areas Database (PAD) GAP Core Areas
+```{r pad_gap}
 
 # Protected Areas Database 
 pad <- read_sf("../R_input_files/mt_pad/PAD_combined_clean.shp") %>%
   st_transform(.,crs(mt_nlcd)) %>% 
   st_simplify()
 
-```
-
-### 2. Protected Areas Database (PAD) GAP Core Areas
-```{r pad_gap}
 # Filter for GAP 1 or 2 parcels -- parcels that manage for biodiversity
 pad_gap <- pad %>% 
-  filter(GAP_Sts %in% c(1,2)) %>% 
-  group_by(GAP_Sts) %>% 
-  summarise() %>% 
-  st_buffer(.,200) %>% 
-  as(.,"Spatial") %>%
+  filter(GAP_Sts %in% c(1,2)|(GAP_Sts == 3 & Mang_Name == 'NPS')) %>% # Filter for polygons that are managed for biodiversity 
+  group_by(GAP_Sts) %>% # Group by status
+  summarise() %>% # Combine those that have the same status
+  st_buffer(.,200) %>% # Buffer to solve weird geometry issues
+  as(.,"Spatial") %>% 
   disaggregate(.) %>%
   st_as_sf() %>% 
   st_buffer(.,-200 ) %>% 
@@ -52,75 +67,103 @@ pad_gap <- pad %>%
   mutate("category" = "pad_gap",
     "object_id" = paste0(1:nrow(.),"_gap"))
 
+# Join with wilderness polygons
+# Join PAD GAP 1 & 2 with fish and wildlife polygons
+wild_gap_join = st_join(wilderness, pad_gap, left = T, largest = T)
+ 
+# Get list of PAD polygons that joined with PAD data
+joined_padIDs = na.omit(wild_gap_join$object_id.y)
+
+# Clean up joined data set -- anything that joined will take the ID of the Gap Status Polygon
+wild_gap_join = dplyr::select(wild_gap_join,-c(category.y,object_id.y)) # Remove columns from join associated with PAD data
+colnames(wild_gap_join)[1:2]= c("category","object_id")
+
+# From the PAD dataset, filter out observations that have already joined with the wilderness dataset
+pad_gap_fltr = filter(pad_gap,!(object_id %in% joined_padIDs))
+
+# Combine the joined data set with the PAD Access parcels that did not join.
+wild_gap_final = rbind(wild_gap_join,pad_gap_fltr)
 
 ```
 
-### 3. Adding in Fish and Wildlife 
+### 3. Fish and Wildlife 
 ```{r fishandwildlife}
 # Montana Fish, Wildlife, and Parks Land Parcels
 fwp = read_sf("../R_input_files/MT_FWP_Lands_Parcels_shp/020b61ed-402c-4012-8e4c-2bf60a7cd0fe202047-1-pd7i66.tiob.shp") %>% 
   st_transform(.,crs(mt_nlcd)) %>% 
   filter(!SITETYPE %in% c("FAS","HTC")) %>% # Remove fishing access sites and fish hatcheries
-  st_buffer(.,200) %>% # Workaround to fix geometry that results from weird/convoluted boundaries
-  group_by(SITEID) %>% # Group by site id
+  st_buffer(.,200) %>% # Workaround to fix geometry that results from weird/convoluted boundaries 
   summarise() %>% # Combine polygons with the same site id
-  st_buffer(.,-200) %>% 
-  dplyr::select() %>% 
-  mutate("category" = "fishwildlifeparks",
+  as(.,"Spatial") %>% 
+  disaggregate() %>% 
+  st_as_sf() %>% 
+  st_buffer(.,-200) %>% # Undo buffer
+  dplyr::select() %>% # remove all attributes other than geometry
+  mutate("category" = "fishwildlifeparks", # Create attributes for the compiled dataset
     "object_id" = paste0(1:nrow(.),"_fwp"))
 
-# Join PAD GAP 1 & 2 with fish and wildlife polygons
-gap_fwp_join = st_join(pad_gap, fwp, left = T, largest = T)
+# Join wilderness/PAD GAP with fish and wildlife polygons
+wildgap_fwp_join = st_join(wild_gap_final, fwp, left = T, largest = T)
 
-# Get list of Conservation Easement polygons that joined with PAD data
-joined_fwpIDs = na.omit(gap_fwp_join$object_id.y)
+# Get list of fish and wildlife polygons that joined with wild/PAD data
+joined_fwpIDs = na.omit(wildgap_fwp_join$object_id.y)
 
 # Clean up joined data set -- anything that joined will take the ID of the Gap Status Polygon
-gap_fwp_join = dplyr::select(gap_fwp_join,-c(category.y,object_id.y,)) # Remove columns from join associated with access data
-colnames(gap_fwp_join)[1:2]= c("category","object_id")
+wildgap_fwp_join = dplyr::select(wildgap_fwp_join,-c(category.y,object_id.y)) # Remove columns from join associated with access data
+colnames(wildgap_fwp_join)[1:2]= c("category","object_id")
 
-# Filter out Conservation Easement parcels that joined with the GAP data set
+# Filter out fish and wildlife polygons that joined with the wild/GAP data set
 fwp_fltr = filter(fwp,!(object_id %in% joined_fwpIDs))
 
-# Combine the joined data set with the PAD Access parcels that did not join. 
-gap_fwp_final = rbind(gap_fwp_join,fwp_fltr)
+# Combine the joined data set with the PAD Access parcels that did not join.
+wildgapfwp_final = rbind(wildgap_fwp_join,fwp_fltr)
 
 ```
-
 
 ### 4. Adding in Conservation Easements
 ```{r conservation_easements}
 
 # Conservation Easements
-cons_easements = read_sf("../R_input_files/ConEasements/ConEasements.shp") %>% 
+cons_easements = read_sf("../R_input_files/ConEasements/ConEasements_clean.shp") %>% 
   st_transform(.,crs(mt_nlcd)) %>% 
   dplyr::select() %>% 
+  # st_buffer(.,200) %>% # Workaround to fix geometry that results from weird/convoluted boundaries
+  # st_buffer(.,-200) %>% 
+  summarise() %>% 
+  as(.,"Spatial") %>% 
+  disaggregate() %>% 
+  st_as_sf() %>% 
   mutate("category" = "conservation_easement",
-    "object_id" = paste0(1:nrow(.),"_consease")) %>% 
-  st_buffer(.,200) %>% # Workaround to fix geometry that results from weird/convoluted boundaries
-  st_buffer(.,-200)
+    "object_id" = paste0(1:nrow(.),"_consease")) 
   
 # Join Final PAD core areas with conservation easement core areas
-gap_fwp_consease_join = st_join(gap_fwp_final,cons_easements, left = T, largest = T)
+wildgapfwp_consease_join = st_join(wildgapfwp_final,cons_easements, left = T, largest = T)
 
 # Get list of Conservation Easement polygons that joined with PAD data
-joined_conseaseIDs = na.omit(gap_fwp_consease_join$object_id.y)
+joined_conseaseIDs = na.omit(wildgapfwp_consease_join$object_id.y)
 
 # Clean up joined data set -- anything that joined will take the ID of the Gap Status Polygon
-gap_fwp_consease_join = dplyr::select(gap_fwp_consease_join,-c(category.y,object_id.y,)) # Remove columns from join associated with access data
+wildgapfwp_consease_join = dplyr::select(wildgapfwp_consease_join,-c(category.y,object_id.y)) # Remove columns from join associated with access data
 
-colnames(gap_fwp_consease_join)[1:2]= c("category","object_id")
+colnames(wildgapfwp_consease_join)[1:2]= c("category","object_id")
 
 # Filter out Conservation Easement parcels that joined with the GAP data set
 consease_fltr = filter(cons_easements,!(object_id %in% joined_conseaseIDs))
 
-# Combine the joined data set with the PAD Access parcels that did not join. 
-gap_fwp_consease_final = rbind(gap_fwp_consease_join,consease_fltr)
+# Combine the joined data set with the PAD Access parcels that did not join.
+wildgapfwpconsease_final = rbind(wildgapfwp_consease_join,consease_fltr)
 
 # Empty geometry fixing
-gap_fwp_consease_final$empty_geos = as.factor(is.na(st_dimension(gap_fwp_consease_final))) # find which one is empty
-gap_fwp_consease_final = filter(gap_fwp_consease_final,empty_geos=="FALSE") %>%  # Filter out the empty one and remove the extra column
-  select(-empty_geos)
+wildgapfwpconsease_final$empty_geos = as.factor(is.na(st_dimension(wildgapfwpconsease_final))) # find which one is empty
+wildgapfwpconsease_final = filter(wildgapfwpconsease_final,empty_geos=="FALSE") %>%  # Filter out the empty one and remove the extra column
+  dplyr::select(-empty_geos)
+
+
+writeOGR(as(wildgapfwpconsease_final,"Spatial"),
+         dsn = "../R_output_files/scratch/",
+         layer = "wildgapfwpconsease",
+         driver = "ESRI Shapefile",
+         overwrite_layer = T)
     
 ```
 
@@ -143,13 +186,13 @@ pad_access = pad %>%
     "object_id" = paste0(1:nrow(.),"_access"))
 
 # Spatial join between GAP and access data sets
-all_join = st_join(gap_fwp_consease_final, pad_access, left = T, largest = T)
+all_join = st_join(wildgapfwpconsease_final, pad_access, left = T, largest = T)
 
 # Get a list of the Access object IDs that joined to the GAP data set
 joined_accessIDs = na.omit(all_join$object_id.y)
 
 # Clean up joined data set -- anything that joined will take the ID of the Gap Status Polygon
-all_join = dplyr::select(all_join,-c(category.y,object_id.y,)) # Remove columns from join associated with access data
+all_join = dplyr::select(all_join,-c(category.y,object_id.y)) # Remove columns from join associated with access data
 
 colnames(all_join)[1:2]= c("category","object_id")
 
@@ -160,6 +203,7 @@ pad_access_fltr = filter(pad_access,!object_id %in% joined_accessIDs)
 all_final = rbind(all_join,pad_access_fltr)
 
 all_final$area = as.numeric(st_area(all_final))
+all_final$mt_core_id = 1:nrow(all_final)
 
 # Write shapefile to check
 writeOGR(as(all_final,"Spatial"),

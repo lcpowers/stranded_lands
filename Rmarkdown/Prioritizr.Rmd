@@ -15,21 +15,23 @@ library(raster)
 ```
 
 ```{r}
+
 county_name <- "CUSTER"
 
-pu_dat = read.csv(paste0("../R_output_files/MarxanInput_byCounty/",county_name,"/pu.dat"))
+pu_dat = read.table(paste0("../R_output_files/MarxanInput_byCounty/",county_name,"/pu.dat"))
+
 pu_shp = read_sf("../R_output_files/marxan_finalPU_shp/CUSTER/CUSTER_finalPU.shp") %>% 
   dplyr::select(id,cost,status) 
 
-pu_shp$cost = round(pu_shp$cost/10000)
+# pu_shp$cost = round(pu_shp$cost/10000)
 
 stranded_budget = sum(pu_shp$cost[pu_shp$status == 1])
 
 spec_files = list.files(paste0("../R_output_files/species/",county_name), pattern = ".tif$", full.names = T)
-species_stack = stack(species_files)
+species_stack = stack(spec_files)
 
-boundary_data <- read.table("../R_output_files/MarxanInput_byCounty/CUSTER/bound_inv.dat")
-colnames(boundary_data) <- c("id1","id2","boundary")
+# boundary_data <- read.table("../R_output_files/MarxanInput_byCounty/CUSTER/bound_inv.dat")
+# colnames(boundary_data) <- c("id1","id2","boundary")
 ```
 
 
@@ -94,7 +96,7 @@ p5 <- problem(pu_shp,species_stack, cost_column = "cost") %>%
   add_relative_targets(0.95) %>% 
   add_locked_in_constraints(pu_shp[pu_shp$status==2,]) %>% 
   add_locked_out_constraints(pu_shp[pu_shp$status==3,]) %>% 
-  add_boundary_penalties(penalty = 5,  data = boundary_data)
+  add_boundary_penalties(penalty = 5,  data = custer_conductivity_mat)
 ```
 
 
@@ -117,7 +119,7 @@ p7 <- problem(pu_shp,species_stack, cost_column = "cost") %>%
   add_relative_targets(0.75) %>% 
   add_locked_in_constraints(pu_shp[pu_shp$status==2,]) %>% 
   add_locked_out_constraints(pu_shp[pu_shp$status==3,]) %>% 
-  add_boundary_penalties(penalty = 5, data = boundary_data) %>% 
+  add_boundary_penalties(penalty = 5, data = custer_conductivity_mat) %>% 
   add_binary_decisions() %>% 
   add_gurobi_solver(gap = 0)
 
@@ -141,9 +143,14 @@ p8 <- problem(pu_shp,species_stack, cost_column = "cost") %>%
 presolve_check(p8)
 
 s8 <- solve(p8, force = T)
-plot(s8[10:14])
+plot(s8[10])
 
+Solutions = s8 %>% 
+  mutate(SummedSolution = sum(4:13)) %>% 
+  dplyr::select(SummedSolution) %>% 
+  filter(SummedSolution>0)
 
+plot(Solutions$geometry)
 ```
 
 

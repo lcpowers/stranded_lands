@@ -12,52 +12,56 @@ mt_outline = read_sf("./R_input_files/mt_outline/StateofMontana.shp") %>%
 
 species_files = list.files("./R_input_files/species", pattern = ".tif", full.names = T)
 
+# This loop significantly speeds up the next loop in which we crop each species' raster to the outline of each county
 for(i in species_files){
   
-  timestamp()
-  tmp_name = str_extract(string = i,pattern = "(?<=./R_input_files/species/).*(?=.tif)")
-  print(tmp_name)
-  tmp = raster(i)
-  crs(tmp) = crs(mt_nlcd_270)
-  tmp_crop = crop(tmp,extent(mt_outline))
-  tmp_mask = mask(tmp_crop,mt_outline)
-  tmp_rsmpl = resample(tmp_mask,mt_nlcd_270,"ngb")
-  assign(tmp_name,tmp_rsmpl)
-  remove(tmp,tmp_name,tmp_rsmpl)
+  timestamp() # To track and anticipate time to process
+  tmp_name = str_extract(string = i,pattern = "(?<=./R_input_files/species/).*(?=.tif)") # Get name of current species being process
+  print(tmp_name) # Print species name to track progress
+  tmp = raster(i) # Read it in as a raster
+  tmp_crop = crop(tmp,extent(mt_outline)) # Crop raster to Montana Outline
+  # tmp_agg = aggregate(tmp_crop, fact = 9, fun = max, na.rm = T, expand = T) # Increase resolution to 270x270
+  tmp_mask = mask(tmp_crop,mt_outline) # Mask the raster to Montana Outline
+  assign(tmp_name,tmp_mask)
+  remove(tmp,tmp_name,tmp_mask)
   
 }
 
 
-mt_counties = read_sf("../R_input_files/mt_counties/County.shp") %>% 
-  st_transform(.,crs(nlcd)) %>% 
+mt_counties = read_sf("./R_input_files/mt_counties/County.shp") %>% 
+  st_transform(.,crs(mt_nlcd_270)) %>% 
   dplyr::select(NAME) 
 
-county_names = mt_counties@data$NAME
+county_names = mt_counties$NAME
 
 species_names =  str_extract(string = species_files,
-                             pattern = "(?<=../R_input_files/species/).*(?=.tif)")
+                             pattern = "(?<=./R_input_files/species/).*(?=.tif)")
 
 for(i in county_names){
   
+  timestamp()
   print(i)
   dir.create(paste0("../R_output_files/species/",i,"/"))
   county_outline = filter(mt_counties, NAME == i) %>% as(.,"Spatial")
   
   for(j in species_names){
     
-    print(j)
-    ras_extent = as(extent(eval(as.name(j))),"SpatialPolygons") # Make a polygon of the extent of the current species' raster
+   # print(j)
+    ras_extent = as(extent(eval(as.name(j))),"SpatialPolygons") # Make a polygon of the extent of the current species' raster 
+    crs(ras_extent) = crs(mt_nlcd_270)
     
-    if(gIntersects(ras_extent,county_outline)){ # If the species extent polygon overlaps with the current county outline...
+   if(gIntersects(ras_extent,county_outline)){ # If the species extent polygon overlaps with the current county outline...
       species_crop = crop(eval(as.name(j)),county_outline) # Crop the species raster to the county outline
       species_mask = mask(species_crop,county_outline) # then mask it to the county outline
-      species_mask[species_mask == 3] = 1 # Change the default 3 value to 1
+      # nlcd_mask = mask(mt_nlcd_270,county_outline)
+      # species_rsmpl = resample(species_mask,nlcd_mask,method = "ngb")
+      species_mask[species_mask > 0] = 1 # Change the default value 3 to 1
       
-      if(cellStats(species_mask,sum) > 0){ # If there are presence cells in that raster (i.e. a small corner of the extent box without and actual species presence wasn't what overlapped)...
+      if(cellStats(species_mask,sum) > 0){ # If there are presence cells in that raster (i.e. a small corner of the extent box without any actual species presence wasn't what overlapped)...
         
         # Write the output raster
-        writeRaster(species_mask, paste0("../R_output_files/species/",i,"/",j,".tif"), overwrite = T)
-      
+        writeRaster(species_mask, paste0("./R_output_files/species/",i,"/",j,"_30.tif"), overwrite = T)
+        
       }
       # Remove those files to make sure the don't interfere with the next loop iteration. Unnecessary, but good for peace of mind
       remove(ras_extent,species_crop,species_mask)

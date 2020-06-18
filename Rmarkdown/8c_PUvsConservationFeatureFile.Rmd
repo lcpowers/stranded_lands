@@ -35,10 +35,12 @@ freq(nlcd)
 ## Loop settings
 ```{r loop_settings}
 
-## If want to loop through all counties, uncomment the following line
-# county_names = as.vector(counties$names)
+counties = read_sf("../R_input_files/mt_counties/County.shp")
 
-county_names = "CUSTER"
+## If want to loop through all counties, uncomment the following line
+county_names = as.vector(counties$NAME)
+
+# county_names = "CUSTER"
 ```
 
 
@@ -59,7 +61,7 @@ for(i in 1:length(county_names)){
   print(c(i,county_name))
   
   # Filter full Montana county shapefile for just the current county
-  county_i_PUs = read_sf(paste0("../R_output_files/marxan_finalPU_shp/",county_name,"/",county_name,"_finalPU.shp"))
+  county_i_PUs = read_sf(paste0("../R_output_files/marxan_finalPU_shp/",county_name,"/",county_name,"_finalPU_standard.shp"))
   
   ## NLCD county i crop ##
   nlcd_county_crop = crop(nlcd,county_i_PUs)
@@ -80,7 +82,7 @@ for(i in 1:length(county_names)){
   for(j in PU_ids){
     
     # Show current PU id index for progress check
-    print(PU_ids %>% {which(. == j)})
+    # print(PU_ids %>% {which(. == j)})
     
     # Select section
     section_i = st_as_sf(county_i_PUs) %>% 
@@ -147,7 +149,7 @@ for(i in 1:length(county_names)){
   species_stack = stack(species_files)
   
   # Get final PU file for current county
-  county_i_PUs = read_sf(paste0("../R_output_files/marxan_finalPU_shp/",county_name,"/",county_name,"_finalPU.shp"))
+  county_i_PUs = read_sf(paste0("../R_output_files/marxan_finalPU_shp/",county_name,"/",county_name,"_finalPU_standard.shp"))
   
   ## Get section IDs for current county
   PU_ids = county_i_PUs$id

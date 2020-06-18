@@ -48,7 +48,7 @@ counties = read_sf("../R_input_files/mt_counties/County.shp")
 # If want to loop through all counties, uncomment the following line
 county_names = as.vector(counties$NAME)
 
-county_names = "CUSTER"
+# county_names = "CUSTER"
 
 ```
 
@@ -109,8 +109,9 @@ for(i in 1:length(county_names)){
 
 ## Create a table with the species penalty factor and NLCD class name, to be joined to zonal stats data at in the following for loop
 species_desc_table = data.frame(id = c(101,102,103,104,105,106,107,108,109,110,111,112),
-                             spf = c(2,2,2,2,2,2,2,2,2,2,2,2),
+                             prop = 0.75,
                              target_coef = c(1,1,1,1,1,1,1,1,1,1,1,1),
+                             spf = 2,
                              name =  c("blackbear", # 101
                                        "blacktailedprariedog", #102
                                        "brownbear", # 103
@@ -137,12 +138,14 @@ for(i in 1:length(county_names)){
   # County name i
   county_name = county_names[i] %>% print()
   
-  county_i_sections = read_sf("../R_input_files/PUs/custer_croppedforMarxan.shp") %>% 
-    filter(status == 1)
+  # county_i_sections = read_sf("../R_input_files/PUs/custer_croppedforMarxan.shp") %>% 
+  #   filter(status == 1)
   
   # Filter full Montana county shapefile to the current(i) county
-  # county_i_sections = read_sf(paste0("../R_output_files/marxan_finalPU_shp/",county_name,"/",county_name,"_finalPU.shp")) %>%
-  #   filter(status == 1)
+  county_i_sections = read_sf(paste0("../R_output_files/marxan_finalPU_shp/",county_name,"/",county_name,"_finalPU_standard.shp")) %>%
+    filter(status == 1)
+  
+  if(nrow(county_i_sections)>0){
   
   species_files = list.files(paste0("../R_output_files/species/",county_name), pattern = ".tif$", full.names = T)
   species_stack = stack(species_files)
@@ -152,7 +155,8 @@ for(i in 1:length(county_names)){
   
   # Determine the frequency of each species class in county i
   species_df = data.frame(name = names(species_mask),
-                            total = cellStats(species_mask,sum))
+                            total = cellStats(species_mask,sum)) %>% 
+    filter(total > 0)
   rownames(species_df) <- NULL
   
   species_df_merge = merge(species_df,species_desc_table)
@@ -162,11 +166,11 @@ for(i in 1:length(county_names)){
   
   # Add the frequency table as an element to the Countyi_speciesfreq_list
   SPECIESbyCounty_list[[i]] = species_df_final
-  
+  }
 }
 
-
 ```
+
 
 
 ```{r}
@@ -182,7 +186,7 @@ for(i in 1:length(NLCDbyCounty_list)){
   spec = rbind(nlcd,species)
   
   ## Write output
-  write_delim(spec, path = paste0("../R_output_files/MarxanInput_byCounty/",county_names[i],"/spec_crop.dat"), delim =" ")
+  write_delim(spec, path = paste0("../R_output_files/MarxanInput_byCounty/",county_names[i],"/spec.dat"), delim =" ")
   
 }
 
