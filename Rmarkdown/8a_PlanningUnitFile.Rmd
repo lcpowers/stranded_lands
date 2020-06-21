@@ -46,13 +46,6 @@ mt_public_stranded = mt_public_land %>%
 # mt_public_accessible = mt_public_land %>% 
 #   filter(strandedal != 1)
 
-## Does it make sense to have non-stranded public land from this file locked into the reserve system? If there is a lot of grazing happening on the land, does it make more sense to center around the core areas that are actually wildlife habitat?
-
-## Grazing Allotments
-# mt_grazing = read_sf("../R_input_files/mt_pad/PAD_combined_clean.shp") %>% 
-#   st_transform(.,crs(nlcd)) %>% 
-#   filter(str_detect(Loc_Ds,"Grazing")) %>% 
-#   dplyr::select(geometry)
 
 ```
 
@@ -287,3 +280,8 @@ for(i in 1:length(county_names)){
 write_csv(cost_thresholds,"../R_output_files/MarxanInput_byCounty/cost_thresholds.csv")
 
 ```
+
+
+
+
+

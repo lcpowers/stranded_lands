@@ -26,7 +26,8 @@ mt_outline <- read_sf("../R_input_files/mt_outline/StateofMontana.shp") %>%
 
 # Montana Counties
 mt_counties <- read_sf("../R_input_files/mt_counties/County.shp") %>% 
-  st_transform(.,crs(mt_nlcd))
+  st_transform(.,crs(mt_nlcd)) %>% 
+  dplyr::select(NAME)
 ```
 
 ### 2. Wilderness Areas
@@ -83,10 +84,9 @@ pad_gap_fltr = filter(pad_gap,!(object_id %in% joined_padIDs))
 
 # Combine the joined data set with the PAD Access parcels that did not join.
 wild_gap_final = rbind(wild_gap_join,pad_gap_fltr)
-
 ```
 
-### 3. Fish and Wildlife 
+### 4. Fish and Wildlife 
 ```{r fishandwildlife}
 # Montana Fish, Wildlife, and Parks Land Parcels
 fwp = read_sf("../R_input_files/MT_FWP_Lands_Parcels_shp/020b61ed-402c-4012-8e4c-2bf60a7cd0fe202047-1-pd7i66.tiob.shp") %>% 
@@ -120,7 +120,7 @@ wildgapfwp_final = rbind(wildgap_fwp_join,fwp_fltr)
 
 ```
 
-### 4. Adding in Conservation Easements
+### 5. Adding in Conservation Easements
 ```{r conservation_easements}
 
 # Conservation Easements
@@ -167,7 +167,7 @@ writeOGR(as(wildgapfwpconsease_final,"Spatial"),
     
 ```
 
-### 5. Adding in Protected Area Database Restricted Access parcels
+### 6. Adding in Protected Area Database Restricted Access parcels
 ```{r pad_access}
 ## Create another set of polygons based on the "Access" column -- rationale is that many of these are manage or used a research for biodiversity, and many relatively natural places with closed or restricted access serve has habitat
 pad_access = pad %>% 
@@ -214,8 +214,9 @@ writeOGR(as(all_final,"Spatial"),
 
 ```
 
-### 6. Function to crop to county
+### 7. Function to crop Core Areas SF to counties
 ```{r create_county_core_area_function}
+
 
 coreareas_fun = function(county_name, core_quality_table, shapefile = T, raster_nodes = T){
   
@@ -225,9 +226,13 @@ coreareas_fun = function(county_name, core_quality_table, shapefile = T, raster_
     dplyr::select(NAME) %>% 
     as(.,"Spatial")
   
-  county_i_cores = raster::intersect(core_areas,county_i) %>% # Crop core areas to county
-    st_as_sf() # Turn into spatial data frame
+  core_areas = st_as_sf(core_areas) %>% 
+    st_buffer(.,5) %>% 
+    as(.,"Spatial")
   
+  county_i_cores = raster::intersect(core_areas,county_i) %>% # Crop core areas to county
+    st_as_sf() # Turn into spatial data frame  
+    
   # Merge Core Areas SF with core quality table
   county_i_cores_merge = merge(county_i_cores,core_quality_table)
   
@@ -262,10 +267,9 @@ coreareas_fun = function(county_name, core_quality_table, shapefile = T, raster_
   
 }
 
-
 ```
 
-### 7. Apply function
+### 8. Apply function
 ```{r apply_core_area_function}
 
 # Need polygons for Linkage Mapper and Marxan (core polys)
@@ -278,19 +282,44 @@ county_names = as.list(mt_counties$NAME)
 # Choose one county to create core areas for
 # county_names = "CUSTER"
 
-core_quality_table = data.frame(category = c("pad_gap","fishwildlifeparks","conservation_easement","pad_access"),
-                                multiplier = c(4,3,2,1)) ## Do more digging about how these lands are managed to decide
-
+core_quality_table = data.frame(category = c("wilderness","pad_gap","fishwildlifeparks","conservation_easement","pad_access"),
+                                multiplier = c(5,4,3,2,1)) ## Do more digging about how these lands are managed to decide
 
 
 for(i in 1:length(county_names)){
   
   county_name = county_names[i]
   
-  coreareas_fun(county_name = county_name, core_quality_table = core_quality_table)
+  coreareas_fun(county_name = county_name, core_quality_table = core_quality_table, raster_nodes = F)
   
 }
 
 ```
 
+Merge MT counties with core areas sf
+```{r}
+
+coreareas_county_merge = st_join(x = core_areas,y = mt_counties) %>% 
+  merge(core_quality_table) %>% 
+  mutate(weighted_area = area*multiplier) %>% 
+  arrange(-weighted_area) %>% 
+  group_by(NAME) %>% 
+  slice(1:5)
+
+montana_cores = st_as_sf(core_areas) %>% 
+  st_buffer(.,5) %>% 
+  as(.,"Spatial") %>% 
+  raster::intersect(.,mt_outline) %>% # Crop core areas to county
+  st_as_sf() # Turn into spatial data frame  
+
+writeOGR(as(coreareas_county_merge,"Spatial"),
+           "../R_output_files/circuitscape/core_area_shapefiles/MONTANA/",
+           "Montana_top5county_coreareas",
+           "ESRI Shapefile",
+           overwrite_layer = T)
+
+coreareas_county_merge_df = as.data.frame(coreareas_county_merge) %>% dplyr::select(-geometry)
+colnames(coreareas_county_merge)
+
+```
 
